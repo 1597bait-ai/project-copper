@@ -63,7 +63,20 @@ async function open(name, contextOptions) {
   };
   const shot = (file) => page.screenshot({ path: `${OUT}/${name}-${file}.png` });
   const sceneActive = (key) => page.waitForFunction((k) => window.__COPPER__.game.scene.isActive(k), key, { timeout: 30000 });
-  return { context, page, errors, G, wait, tap, shot, sceneActive };
+  /**
+   * Teleports the player onto a walkable tile next to the fixture of this id nearest to tile (nearX, nearY),
+   * and returns that fixture's tile. Works on any map, so the checks don't depend on the layout.
+   */
+  const standBy = (id, nearX = 0, nearY = 0) =>
+    G(`const T = 64;
+       const fs = g.world.fixtures.filter((f) => f.def.id === '${id}');
+       fs.sort((a, b) => Math.hypot(a.x / T - ${nearX}, a.y / T - ${nearY}) - Math.hypot(b.x / T - ${nearX}, b.y / T - ${nearY}));
+       const f = fs[0];
+       const tx = Math.floor(f.x / T), ty = Math.floor(f.y / T);
+       const spot = [[0, 0], [0, 1], [0, -1], [1, 0], [-1, 0]].find(([dx, dy]) => !g.world.nav.blocked(tx + dx, ty + dy));
+       g.player.body.reset((tx + spot[0] + 0.5) * T, (ty + spot[1] + 0.5) * T);
+       return { x: tx, y: ty };`);
+  return { context, page, errors, G, wait, tap, shot, sceneActive, standBy };
 }
 
 // ---- desktop: the rules -------------------------------------------------------------
