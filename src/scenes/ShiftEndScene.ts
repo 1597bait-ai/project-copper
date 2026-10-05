@@ -83,10 +83,11 @@ export class ShiftEndScene extends Phaser.Scene {
 
     const again = s.fired ? 'TRY AGAIN' : 'NEXT SHIFT';
     const by = portrait ? y + 240 : H - 150;
-    new Button(this, cx - 240, by, again, () => this.scene.start('Game', { character: s.character }), { width: 420, height: 104, fontSize: 44 });
+    const replay = () => this.scene.start('Game', { character: s.character, mapText: s.mapText });
+    new Button(this, cx - 240, by, again, replay, { width: 420, height: 104, fontSize: 44 });
     new Button(this, cx + 240, by, 'MENU', () => this.scene.start('Menu'), { width: 420, height: 104, fontSize: 44, fill: 0x3d4558 });
 
-    this.input.keyboard!.once('keydown-ENTER', () => this.scene.start('Game', { character: s.character }));
+    this.input.keyboard!.once('keydown-ENTER', replay);
     this.input.keyboard!.once('keydown-ESC', () => this.scene.start('Menu'));
     this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize, this));

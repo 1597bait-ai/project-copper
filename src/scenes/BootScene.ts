@@ -4,9 +4,9 @@ import { allSprites } from '../art/sprites';
 import { setMuted } from '../systems/sfx';
 import { loadSave } from '../systems/save';
 import { textStyle } from '../ui/theme';
-import { MAPS, tilesetTextureKey } from '../world/maps';
+import { TILESET_TEXTURE, TILESET_URL } from '../world/maps';
 
-/** Loads maps + tilesets and turns the SVG art into textures, then opens the menu. */
+/** Loads the tileset and turns the SVG art into textures, then opens the menu. */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -15,10 +15,7 @@ export class BootScene extends Phaser.Scene {
   preload(): void {
     const label = this.add.text(this.scale.width / 2, this.scale.height / 2, 'Loading…', textStyle(48)).setOrigin(0.5);
     this.load.on(Phaser.Loader.Events.PROGRESS, (v: number) => label.setText(`Loading… ${Math.round(v * 100)}%`));
-    for (const map of MAPS) {
-      this.load.tilemapTiledJSON(map.key, map.data);
-      for (const [name, url] of Object.entries(map.tilesets)) this.load.image(tilesetTextureKey(name), url);
-    }
+    this.load.image(TILESET_TEXTURE, TILESET_URL);
   }
 
   async create(): Promise<void> {

@@ -416,7 +416,7 @@ export class HudScene extends Phaser.Scene {
 
   private restartShift() {
     const character = this.gameScene.player.character.id;
-    this.scene.start('Game', { character });
+    this.scene.start('Game', { character, mapText: this.gameScene.mapText });
   }
 
   private quit() {

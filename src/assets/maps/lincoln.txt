@@ -1,0 +1,91 @@
+// Project Copper map. One character = one 64px tile. Every row must be the same width.
+// Lines starting with // are notes. "@ x,y Name" names the room containing tile x,y
+// (x counts columns from 0 on the left, y counts rows from 0 at the top).
+//
+// Floors and walls:
+//   .  Hallway floor
+//   ,  Classroom carpet
+//   ~  Restroom tile
+//   b  Boiler room concrete
+//   o  Office carpet
+//   j  Janitor's concrete
+//   p  Asphalt
+//   |  Parking line
+//   _  Sidewalk
+//   g  Grass
+//   #  Interior wall
+//   B  Brick wall
+//   F  Fence
+//   =  Lobby terrazzo
+//   k  Storage plywood
+//   n  Lounge linoleum
+//
+// Things (they stand on the floor next to them):
+//   P  Player start
+//   G  Mr. Gravy start
+//   S  Student
+//   V  Van (fill a 2x4 or 4x2 block)
+//   L  Locked door
+//   f  drinking fountain
+//   h  wall heater
+//   t  toilet
+//   m  mop sink
+//   c  abandoned copper pile
+//   d  desk
+//   l  lamp
+//   1-9  Mr. Gravy's route, walked in order and looped
+
+@ 9,40 Front Office
+@ 40,40 Nurse's Office
+@ 40,6 Mechanical Room
+
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+Fgg____________________________________________ggF
+Fgg_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB_ggF
+Fgg_Bbbbbbbbbbbb#ooooool#kkkkkkkkk#bbbbbbbbbbB_ggF
+Fgg_Bbbbcbbbbbbb#oodoooo#klkkkckkk#bbbbbbbbbhB_ggF
+Fgg_Bbbbbbbbbbbh#oooGooo#kkkkkkkkk#bbbbbcbbbbB_ggF
+Fgg_Bbbbbbbbbbbb#ooooooo#kkkkkkkkk#bbbbbbbbbbB_ggF
+Fgg_Bhbbbbbbcbbb#ooo1ooo#klkkkkkdk#bbbbbbbbbhB_ggF
+Fgg_Bbbbbbbbbbbb#ooooooo#kkkkkkkkk#hbbbbbbbbbB_ggF
+Fgg_Bbbbbbbbbbbb#ooooooo#kkkkkkkkk#bbbbbbbbbbB_ggF
+Fgg_B########LL#####..######..#########LL####B_ggF
+Fgg_B....f......................f............B_ggF
+Fgg_B...................2................3...B_ggF
+Fgg_B...h...............h.................h..B_ggF
+Fgg_B########...###..#######..###...#########B_ggF
+Fgg_B~~~~~~~#...#,,,,,,l#l,,,,,,#...#jjjjjjjjB_ggF
+Fgg_Bt~~~~~~#...#,,,,,,,#,,,,,,,#...#jjjjjjjmB_ggF
+Fgg_B~~~~~~~#...#,d,,,d,#,d,,,d,#....jjjjjjjjB_ggF
+Fgg_B~~~~~~~...f#,,,,,,,#,,,S,,,#f...jjjjjjjjB_ggF
+Fgg_Bt~~~~~~....#,d,,,d,#,d,,,d,#...#jjjjjjjmB_ggF
+Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#...#jjjjjjjjB_ggF
+Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#...#########B_ggF
+Fgg_Bt~~~~~~#...####..#####..####...#nnnnnnnnB_ggF
+Fgg_B~~~~~~~#...........f...........#nnnnnnnnB_ggF
+Fgg_B########.8.....S...9.........4.#nnnlnnnnB_ggF
+Fgg_B~~~~~~~#.......................#nnnnnnnnB_ggF
+Fgg_Bt~~~~~~#h..####..#####..####...#nnndndnnB_ggF
+Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#....nnnnnnnnB_ggF
+Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#....nnnnnnnnB_ggF
+Fgg_Bt~~~~~~....#,d,,,d,#,d,,,d,#...#nnnnnnnfB_ggF
+Fgg_B~~~~~~~....#,,,S,,,#,,,,,,,#..h#nnnnnnnnB_ggF
+Fgg_B~~~~~~~#...#,d,,,d,#,d,,,d,#...#nnnnnnlnB_ggF
+Fgg_Bt~~~~~~#...#,,,,,,,#,,,,,,,#...#nnnnnnnnB_ggF
+Fgg_B~~~~~~~#...#,,,,,,l#l,,,,,,#...#nnnnnnnnB_ggF
+Fgg_B########...###..#######..###...#########B_ggF
+Fgg_B.................................h......B_ggF
+Fgg_B...7.....................S..........5...B_ggF
+Fgg_B.......f................................B_ggF
+Fgg_B####..###########......###########..####B_ggF
+Fgg_Boooooooolo#==================#nnnnnnnnlnB_ggF
+Fgg_Bododoooooo#==d=====6======d==#nndnnnnnnnB_ggF
+Fgg_Booooooodoo#==================#nnnnnnnnnnB_ggF
+Fgg_Boooooooooo#==================#nnnnnnnnnnB_ggF
+Fgg_BBBBBBBBBBBBBBBBBBB====BBBBBBBBBBBBBBBBBBB_ggF
+Fgg_____________________P______________________ggF
+FppppppppppppppppppppppppppppppppppppppppppppppppF
+Fpppppp|pppp|pppp|pppp|VVVV|pppp|pppp|pppp|ppppppF
+Fpppppp|pppp|pppp|pppp|VVVV|pppp|pppp|pppp|ppppppF
+Fpppppp|pppp|pppp|pppp|pppp|pppp|pppp|pppp|ppppppF
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF

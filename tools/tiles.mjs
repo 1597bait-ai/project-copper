@@ -1,5 +1,6 @@
-// Tileset definition shared by tools/render-art.mjs (draws the PNG) and
-// tools/generate-map.mjs (writes the Tiled map). Each tile is a 64x64 SVG snippet.
+// Tile art for tools/render-art.mjs, which draws src/assets/tiles/school-tiles.png.
+// Each tile is a 64x64 SVG snippet. The ORDER and `char`s must match src/world/legend.ts
+// (a unit test checks this): the game finds each tile by its position in the PNG.
 
 export const TILE = 64;
 export const COLUMNS = 8;
@@ -27,7 +28,7 @@ const rect = (fill, extra = '') => `<rect width="64" height="64" fill="${fill}" 
 
 const asphalt = () => rect('#3b3f45') + speckles(11, 70, ['#4c5057', '#2f3237', '#55595f'], 0.5, 1.4, 0.8);
 
-/** char = the character used for this tile in tools/maps/*.txt; layer = which Tiled layer it goes on. */
+/** char = the character used for this tile in map files; layer = floor or walls. */
 export const TILES = [
   {
     name: 'hall floor',
@@ -148,6 +149,34 @@ export const TILES = [
       }
       return s + `<rect x="0" y="0" width="64" height="64" fill="none" stroke="#6f777f" stroke-width="5"/>`;
     },
+  },
+  {
+    name: 'lobby terrazzo',
+    char: '=',
+    layer: 'floor',
+    svg: () =>
+      rect('#b9b3a8') +
+      speckles(12, 140, ['#8e8679', '#d8d2c6', '#a59d90', '#6f8a8f', '#c26a3d'], 0.6, 1.6, 0.85) +
+      `<path d="M0 1H64M1 0V64" stroke="#8a8478" stroke-width="2"/>`,
+  },
+  {
+    name: 'storage plywood',
+    char: 'k',
+    layer: 'floor',
+    svg: () => {
+      let s = rect('#a98a5e');
+      for (let i = 0; i < 4; i++) s += `<rect x="0" y="${i * 16}" width="64" height="15" fill="${['#b0915f', '#9f8155', '#ab8c5c', '#a3855a'][i]}"/>`;
+      return s + speckles(13, 30, ['#7d6440', '#c2a676'], 0.6, 1.4, 0.8) + `<path d="M${'0 16H64M0 32H64M0 48H64'}" stroke="#7a6140" stroke-width="1.5"/>`;
+    },
+  },
+  {
+    name: 'lounge linoleum',
+    char: 'n',
+    layer: 'floor',
+    svg: () =>
+      rect('#d9d4c4') +
+      `<rect width="32" height="32" fill="#7a9a86"/><rect x="32" y="32" width="32" height="32" fill="#7a9a86"/>` +
+      speckles(14, 30, ['#c6c0ae', '#6a8a76'], 0.6, 1.2, 0.6),
   },
 ];
 

@@ -13,11 +13,15 @@ import { clockText } from '../systems/clock';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
 import { sfx } from '../systems/sfx';
 import { cssPerGamePixel, money, textStyle } from '../ui/theme';
+import { parseMap } from '../world/mapText';
+import { DEFAULT_MAP } from '../world/maps';
+import { validateMap } from '../world/validate';
 import { World } from '../world/World';
 
 export interface GameInit {
   character?: string;
-  map?: string;
+  /** Text of the map to play (from the map editor). Defaults to the built-in school. */
+  mapText?: string;
 }
 
 export interface ShiftSummary {
@@ -27,6 +31,8 @@ export interface ShiftSummary {
   lost: ScrapContents;
   warnings: number;
   character: string;
+  /** Set when the shift was played on a custom map, so "next shift" stays on it. */
+  mapText?: string;
 }
 
 type Target = { kind: 'fixture'; fixture: Fixture } | { kind: 'door'; door: Door };
@@ -59,7 +65,8 @@ export class GameScene extends Phaser.Scene {
   hud!: HudState;
 
   private characterId = 'dalton';
-  private mapKey = 'school-01';
+  /** Custom map text, or undefined for the built-in map. */
+  mapText: string | undefined;
   private elapsed = 0;
   private earned = 0;
   private warnings = 0;
@@ -85,7 +92,7 @@ export class GameScene extends Phaser.Scene {
 
   init(data: GameInit): void {
     this.characterId = data.character && CHARACTERS[data.character] ? data.character : 'dalton';
-    this.mapKey = data.map ?? 'school-01';
+    this.mapText = data.mapText;
     this.elapsed = 0;
     this.earned = 0;
     this.warnings = 0;
@@ -102,7 +109,16 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     const character: CharacterDef = CHARACTERS[this.characterId];
-    this.world = new World(this, this.mapKey);
+    let map = parseMap(this.mapText ?? DEFAULT_MAP.text);
+    const report = validateMap(map);
+    if (report.errors.length) {
+      // Never strand the player on a broken map: fall back to the built-in school.
+      console.warn('Map has problems, playing the default map instead:', report.errors);
+      this.mapText = undefined;
+      map = parseMap(DEFAULT_MAP.text);
+      this.time.delayedCall(800, () => this.toast(`That map can't be played yet: ${report.errors[0]}`, '#ffc23d', 5000));
+    }
+    this.world = new World(this, map);
     this.physics.world.setBounds(0, 0, this.world.width, this.world.height);
 
     this.player = new Player(this, this.world.playerSpawn.x, this.world.playerSpawn.y, character);
@@ -300,6 +316,7 @@ export class GameScene extends Phaser.Scene {
       lost: this.lost,
       warnings: this.warnings,
       character: this.characterId,
+      mapText: this.mapText,
     };
     this.cameras.main.fadeOut(500, 20, 22, 28);
     this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {

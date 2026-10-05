@@ -1,24 +1,19 @@
-import school01 from '../assets/maps/school-01.json';
+import lincoln from '../assets/maps/lincoln.txt?raw';
 import schoolTiles from '../assets/tiles/school-tiles.png';
 
-// Every playable map. Add a level by drawing it in Tiled (or tools/maps/*.txt + `npm run map`)
-// and listing it here.
+// Every playable map. A map is a plain text file (see src/world/mapText.ts for the format and
+// src/world/legend.ts for the characters). Edit one in any text editor or with the in-game
+// map editor, then list new ones here.
 
 export interface MapEntry {
   key: string;
   name: string;
-  data: object;
-  /** Tileset name inside the Tiled file -> image URL. */
-  tilesets: Record<string, string>;
+  text: string;
 }
 
-export const MAPS: MapEntry[] = [
-  {
-    key: 'school-01',
-    name: 'Lincoln Middle School',
-    data: school01,
-    tilesets: { school: schoolTiles },
-  },
-];
+export const MAPS: MapEntry[] = [{ key: 'lincoln', name: 'Lincoln Middle School', text: lincoln }];
 
-export const tilesetTextureKey = (name: string) => `tileset-${name}`;
+export const DEFAULT_MAP = MAPS[0];
+
+export const TILESET_TEXTURE = 'tileset-school';
+export const TILESET_URL = schoolTiles;

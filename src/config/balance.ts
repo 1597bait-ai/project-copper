@@ -6,7 +6,7 @@ export const TILE = 64;
 export const BALANCE = {
   shift: {
     /** Real seconds in one shift. */
-    lengthSeconds: 240,
+    lengthSeconds: 300,
     /** Clock shown on the HUD runs from startHour to endHour. */
     startHour: 7,
     endHour: 15,
@@ -48,7 +48,7 @@ export const BALANCE = {
 
   boss: {
     /** Patrol speed as a fraction of chase speed. */
-    patrolFactor: 0.55,
+    patrolFactor: 0.62,
     waypointPause: [0.8, 1.8] as [number, number],
     /** Awareness stat -> how far the vision cone reaches (tiles). Mr. Gravy (2) = 5 tiles. */
     visionRangeTiles: (awareness: number) => 2.5 + 1.25 * awareness,
