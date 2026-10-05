@@ -14,21 +14,11 @@
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <title>Project Copper</title>
     <style>
+      /* The game has one deliberate dark look in every theme. */
       :root {
         --bg: #14161c;
         --text: #f6f1e5;
-        --accent: #e8914a;
         color-scheme: dark;
-      }
-      @media (prefers-color-scheme: dark) {
-        :root:not([data-theme='light']) {
-          --bg: #14161c;
-          --text: #f6f1e5;
-        }
-      }
-      :root[data-theme='dark'] {
-        --bg: #14161c;
-        --text: #f6f1e5;
       }
       html,
       body {
@@ -54,43 +44,10 @@
         bottom: env(safe-area-inset-bottom, 0);
         left: env(safe-area-inset-left, 0);
       }
-      #rotate {
-        display: none;
-        position: fixed;
-        inset: 0;
-        z-index: 10;
-        background: var(--bg);
-        color: var(--text);
-        font: 700 22px/1.4 'Arial Black', Arial, sans-serif;
-        text-align: center;
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        gap: 18px;
-        padding: 16px;
-      }
-      #rotate .phone {
-        width: 56px;
-        height: 96px;
-        border: 6px solid var(--accent);
-        border-radius: 12px;
-        animation: turn 1.6s ease-in-out infinite;
-      }
-      @keyframes turn {
-        0%, 20% { transform: rotate(0deg); }
-        60%, 100% { transform: rotate(-90deg); }
-      }
-      @media (orientation: portrait) and (pointer: coarse) {
-        #rotate { display: flex; }
-      }
     </style>
   </head>
   <body>
     <div id="game"></div>
-    <div id="rotate">
-      <div class="phone"></div>
-      <div>Turn your phone sideways to play</div>
-    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

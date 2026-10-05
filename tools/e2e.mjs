@@ -218,6 +218,34 @@ async function open(name, contextOptions) {
   await context.close();
 }
 
+// ---- phone held upright: portrait layout -----------------------------------------------
+{
+  const { context, page, errors, G, wait, shot, sceneActive } = await open('portrait', { ...devices['iPhone 13'], deviceScaleFactor: 2 });
+  await shot('menu');
+  // The menu camera is zoomed in portrait, so convert the button's world position to the screen.
+  const start = await page.evaluate(() => {
+    const gm = window.__COPPER__.game;
+    const menu = gm.scene.getScene('Menu');
+    const btn = menu.children.list.find((o) => o.label?.text === 'START SHIFT');
+    const cam = menu.cameras.main;
+    const r = gm.canvas.getBoundingClientRect();
+    const k = r.width / gm.scale.width;
+    return { x: r.left + (btn.x - cam.worldView.x) * cam.zoom * k, y: r.top + (btn.y - cam.worldView.y) * cam.zoom * k };
+  });
+  await page.touchscreen.tap(start.x, start.y);
+  await sceneActive('Game');
+  await G(`g.boss.grace = 9999; g.player.body.reset(${21.5 * T}, ${11.5 * T});`);
+  await wait(1.5);
+  await shot('game');
+  check('portrait: zoomed camera, larger HUD, scrap prompt', await G(`return g.cameras.main.zoom > 2 && h.ui > 2 && g.hud.action === 'SCRAP';`));
+  await G('g.elapsed = 239.9;');
+  await sceneActive('ShiftEnd');
+  await page.waitForTimeout(600);
+  await shot('shift-over');
+  check('no console errors (portrait)', errors.length === 0, errors);
+  await context.close();
+}
+
 await browser.close();
 await server.close();
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll e2e checks passed. Screenshots in .smoke/');

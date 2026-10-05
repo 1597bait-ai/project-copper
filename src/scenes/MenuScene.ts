@@ -2,13 +2,22 @@ import Phaser from 'phaser';
 import { ABILITIES, CHARACTERS, CHARACTER_ORDER } from '../config/characters';
 import { sfx, unlockAudio } from '../systems/sfx';
 import { loadSave, updateSave } from '../systems/save';
-import { Button, COLORS, isTouchDevice, money, textStyle } from '../ui/theme';
+import { Button, COLORS, fitColumn, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 
-/** Title screen + crew select. */
+interface Card {
+  id: string;
+  frame: Phaser.GameObjects.Graphics;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Title screen + crew select. Cards sit in a row in landscape and stack in portrait. */
 export class MenuScene extends Phaser.Scene {
   private selected = 'dalton';
   private starting = false;
-  private cards: { id: string; frame: Phaser.GameObjects.Graphics; x: number; y: number; w: number; h: number }[] = [];
+  private cards: Card[] = [];
 
   constructor() {
     super('Menu');
@@ -19,50 +28,64 @@ export class MenuScene extends Phaser.Scene {
     this.starting = false;
     this.selected = CHARACTERS[save.character] ? save.character : 'dalton';
     this.cards = [];
-    const W = this.scale.width;
-    const H = this.scale.height;
+    const portrait = isPortrait(this.scale);
+    if (!portrait) this.cameras.main.setZoom(1).setScroll(0, 0);
+    const { width: W, height: H } = portrait ? fitColumn(this, 1080, 1800) : { width: this.scale.width, height: this.scale.height };
     const cx = W / 2;
+    // Portrait content is a 1080-wide column, vertically centred.
+    const top = portrait ? Math.max(0, (H - 1800) / 2) : 0;
 
     this.drawBackground(W, H);
 
     // Title
-    this.add.text(cx, 70, 'PROJECT', textStyle(46, COLORS.muted)).setOrigin(0.5, 0);
-    const title = this.add.text(cx, 112, 'COPPER', textStyle(150, COLORS.copper, { strokeThickness: 18 })).setOrigin(0.5, 0);
+    this.add.text(cx, top + 70, 'PROJECT', textStyle(46, COLORS.muted)).setOrigin(0.5, 0);
+    const title = this.add
+      .text(cx, top + 112, 'COPPER', textStyle(portrait ? 170 : 150, COLORS.copper, { strokeThickness: 18 }))
+      .setOrigin(0.5, 0);
     title.setShadow(0, 10, '#000000', 0, true, true);
     this.tweens.add({ targets: title, scale: { from: 1, to: 1.03 }, yoyo: true, repeat: -1, duration: 1200, ease: 'Sine.InOut' });
+    const tagline = "Strip the school for scrap. Get it to the van. Don't let Mr. Gravy catch you.";
     this.add
-      .text(cx, 290, 'Strip the school for scrap. Get it to the van. Don\'t let Mr. Gravy catch you.', textStyle(30, COLORS.text))
+      .text(cx, top + (portrait ? 320 : 290), tagline, textStyle(30, COLORS.text, { align: 'center', wordWrap: { width: portrait ? 900 : 1600 } }))
       .setOrigin(0.5, 0);
 
     // Crew cards
-    const cardW = 400;
-    const cardH = 440;
-    const gap = 36;
-    const totalW = CHARACTER_ORDER.length * cardW + (CHARACTER_ORDER.length - 1) * gap;
-    const top = 370;
-    CHARACTER_ORDER.forEach((id, i) => {
-      const x = cx - totalW / 2 + i * (cardW + gap);
-      this.buildCard(id, x, top, cardW, cardH);
-    });
+    let buttonY: number;
+    if (portrait) {
+      const cardW = 960;
+      const cardH = 300;
+      const y0 = top + 440;
+      CHARACTER_ORDER.forEach((id, i) => this.buildCard(id, cx - cardW / 2, y0 + i * (cardH + 28), cardW, cardH, true));
+      buttonY = y0 + CHARACTER_ORDER.length * (cardH + 28) + 90;
+    } else {
+      const cardW = 400;
+      const cardH = 440;
+      const gap = 36;
+      const totalW = CHARACTER_ORDER.length * cardW + (CHARACTER_ORDER.length - 1) * gap;
+      CHARACTER_ORDER.forEach((id, i) => this.buildCard(id, cx - totalW / 2 + i * (cardW + gap), 370, cardW, cardH, false));
+      buttonY = 370 + cardH + 110;
+    }
     this.refreshCards();
 
-    // Play
-    new Button(this, cx, top + cardH + 110, 'START SHIFT', () => this.play(), { width: 520, height: 112, fontSize: 52 });
+    new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { width: portrait ? 700 : 520, height: 112, fontSize: 52 });
 
     const help = isTouchDevice()
-      ? 'Left thumb moves  ·  big button scraps  ·  bring scrap to the white van to sell it'
+      ? `Left thumb moves  ·  big button scraps  ·  bring scrap to the white van to sell it${portrait ? '  ·  turn sideways for a wider view' : ''}`
       : 'WASD / arrows move  ·  E scraps  ·  Q uses your ability  ·  bring scrap to the white van to sell it';
-    this.add.text(cx, H - 70, help, textStyle(24, COLORS.muted)).setOrigin(0.5);
+    const footY = portrait ? buttonY + 110 : H - 70;
+    this.add.text(cx, footY, help, textStyle(24, COLORS.muted, { align: 'center', wordWrap: { width: portrait ? 900 : 1800 } })).setOrigin(0.5, 0);
     if (save.bestShift > 0) {
-      this.add.text(cx, H - 34, `Best shift: ${money(save.bestShift)}   ·   Lifetime: ${money(save.totalEarned)}`, textStyle(22, COLORS.copper)).setOrigin(0.5);
+      this.add
+        .text(cx, portrait ? footY + 100 : H - 34, `Best shift: ${money(save.bestShift)}   ·   Lifetime: ${money(save.totalEarned)}`, textStyle(22, COLORS.copper))
+        .setOrigin(0.5);
     }
 
     const kb = this.input.keyboard!;
     kb.on('keydown', (e: KeyboardEvent) => {
       unlockAudio();
       const i = CHARACTER_ORDER.indexOf(this.selected);
-      if (e.key === 'ArrowLeft' || e.key === 'a') this.select(CHARACTER_ORDER[(i + CHARACTER_ORDER.length - 1) % CHARACTER_ORDER.length]);
-      if (e.key === 'ArrowRight' || e.key === 'd') this.select(CHARACTER_ORDER[(i + 1) % CHARACTER_ORDER.length]);
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'a') this.select(CHARACTER_ORDER[(i + CHARACTER_ORDER.length - 1) % CHARACTER_ORDER.length]);
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'd') this.select(CHARACTER_ORDER[(i + 1) % CHARACTER_ORDER.length]);
       if (e.key === 'Enter' || e.key === ' ') this.play();
     });
     this.input.on('pointerdown', () => unlockAudio());
@@ -85,30 +108,50 @@ export class MenuScene extends Phaser.Scene {
     this.add.image(170, H - 210, 'mr_gravy_big').setRotation(-0.4).setAlpha(0.14);
   }
 
-  private buildCard(id: string, x: number, y: number, w: number, h: number) {
+  private buildCard(id: string, x: number, y: number, w: number, h: number, compact: boolean) {
     const c = CHARACTERS[id];
     const frame = this.add.graphics();
     this.cards.push({ id, frame, x, y, w, h });
-    const mid = x + w / 2;
-    this.add.image(mid, y + 110, `${c.sprite}_big`).setRotation(-Math.PI / 2).setScale(0.9);
-    this.add.text(mid, y + 214, c.name.toUpperCase(), textStyle(44)).setOrigin(0.5, 0);
-    this.add.text(mid, y + 266, c.tagline, textStyle(20, COLORS.muted)).setOrigin(0.5, 0);
     const stats: [string, number][] = [
       ['SPEED', c.stats.speed],
       ['REPAIR', c.stats.repair],
       ['CARRY', c.stats.carry],
     ];
-    const pips = this.add.graphics();
-    stats.forEach(([label, value], i) => {
-      const sy = y + 312 + i * 34;
-      this.add.text(x + 40, sy, label, textStyle(22)).setOrigin(0, 0.5);
-      for (let p = 0; p < 3; p++) {
-        pips.fillStyle(p < value ? c.color : 0x000000, p < value ? 1 : 0.45).fillRoundedRect(x + 200 + p * 52, sy - 11, 44, 22, 6);
-      }
-    });
     const ability = c.ability ? ABILITIES[c.ability].name : 'No special ability (yet)';
-    this.add.text(mid, y + h - 22, ability, textStyle(20, c.ability ? '#c9a7ff' : COLORS.muted)).setOrigin(0.5, 1);
-    const hit = this.add.zone(mid, y + h / 2, w, h).setInteractive({ useHandCursor: true });
+    const abilityColor = c.ability ? '#c9a7ff' : COLORS.muted;
+    const pips = this.add.graphics();
+    const drawPips = (sx: number, sy: number, value: number) => {
+      for (let p = 0; p < 3; p++) {
+        pips.fillStyle(p < value ? c.color : 0x000000, p < value ? 1 : 0.45).fillRoundedRect(sx + p * 52, sy - 11, 44, 22, 6);
+      }
+    };
+
+    if (compact) {
+      // Portrait: portrait on the left, details on the right.
+      this.add.image(x + 140, y + h / 2, `${c.sprite}_big`).setRotation(-Math.PI / 2).setScale(0.95);
+      const tx = x + 290;
+      this.add.text(tx, y + 26, c.name.toUpperCase(), textStyle(48)).setOrigin(0, 0);
+      this.add.text(tx, y + 86, c.tagline, textStyle(24, COLORS.muted)).setOrigin(0, 0);
+      stats.forEach(([label, value], i) => {
+        const sy = y + 150 + i * 36;
+        this.add.text(tx, sy, label, textStyle(22)).setOrigin(0, 0.5);
+        drawPips(tx + 140, sy, value);
+      });
+      this.add.text(x + w - 30, y + h - 26, ability, textStyle(22, abilityColor)).setOrigin(1, 1);
+    } else {
+      const mid = x + w / 2;
+      this.add.image(mid, y + 110, `${c.sprite}_big`).setRotation(-Math.PI / 2).setScale(0.9);
+      this.add.text(mid, y + 214, c.name.toUpperCase(), textStyle(44)).setOrigin(0.5, 0);
+      this.add.text(mid, y + 266, c.tagline, textStyle(20, COLORS.muted)).setOrigin(0.5, 0);
+      stats.forEach(([label, value], i) => {
+        const sy = y + 312 + i * 34;
+        this.add.text(x + 40, sy, label, textStyle(22)).setOrigin(0, 0.5);
+        drawPips(x + 200, sy, value);
+      });
+      this.add.text(mid, y + h - 22, ability, textStyle(20, abilityColor)).setOrigin(0.5, 1);
+    }
+
+    const hit = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive({ useHandCursor: true });
     hit.on('pointerup', () => {
       if (this.selected === id) this.play();
       else this.select(id);

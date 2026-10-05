@@ -89,6 +89,30 @@ export class Button extends Phaser.GameObjects.Container {
   }
 }
 
+/** How many CSS pixels one game pixel covers on this screen (small on phones, ~1 on desktops). */
+export function cssPerGamePixel(scale: Phaser.Scale.ScaleManager): number {
+  return scale.displaySize.width / Math.max(1, scale.gameSize.width);
+}
+
+export function isPortrait(scale: Phaser.Scale.ScaleManager): boolean {
+  return scale.height > scale.width;
+}
+
+/**
+ * For menu-style screens in portrait: zooms the camera so a fixed-width column of
+ * `columnWidth` x `minHeight` virtual pixels fits, and returns the virtual screen size.
+ */
+export function fitColumn(scene: Phaser.Scene, columnWidth: number, minHeight: number): { width: number; height: number } {
+  const { width: W, height: H } = scene.scale;
+  const zoom = Math.min(W / columnWidth, H / minHeight);
+  const width = W / zoom;
+  const height = H / zoom;
+  const cam = scene.cameras.main;
+  cam.setZoom(zoom);
+  cam.centerOn(width / 2, height / 2);
+  return { width, height };
+}
+
 export function isTouchDevice(): boolean {
   try {
     return window.matchMedia('(pointer: coarse)').matches || (navigator.maxTouchPoints > 0 && !window.matchMedia('(pointer: fine)').matches);

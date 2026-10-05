@@ -3,7 +3,7 @@ import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
 import { controls } from '../input/Controls';
 import { isMuted, setMuted, sfx, unlockAudio } from '../systems/sfx';
 import { updateSave } from '../systems/save';
-import { Button, COLORS, isTouchDevice, money, textStyle } from '../ui/theme';
+import { Button, COLORS, cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import type { GameScene, HudState } from './GameScene';
 
 const ABILITY_SHORT: Record<string, string> = { student_disguise: 'HIDE', look_busy: 'LOOK\nBUSY' };
@@ -15,6 +15,9 @@ export class HudScene extends Phaser.Scene {
   private paused = false;
   private pausedFrame = -1;
   private ui = 1;
+  private clockTop = 0;
+  private toastTop = 0;
+  private promptY = 0;
 
   private panel!: Phaser.GameObjects.Graphics;
   private moneyText!: Phaser.GameObjects.Text;
@@ -106,20 +109,28 @@ export class HudScene extends Phaser.Scene {
   // ---- layout ------------------------------------------------------------
 
   private layout(): void {
-    // Bigger UI on touch screens, biggest on phones.
-    this.ui = this.touch ? (this.scale.displaySize.height < 520 ? 1.3 : 1.12) : 1;
-    const s = this.ui;
+    // Scale the HUD so text stays readable on small screens (money ~24 CSS px), and in
+    // portrait keep the top row inside the screen width.
+    const portrait = isPortrait(this.scale);
+    let ui = Math.max(this.touch ? 1.12 : 1, 24 / (52 * cssPerGamePixel(this.scale)));
+    if (portrait) ui = Math.min(ui, this.W / 880);
+    this.ui = ui;
+    const s = ui;
     const m = 24 * s;
+    const ar = 112 * s;
+    // Portrait: the clock moves under the top row. Prompts sit above the touch buttons.
+    this.clockTop = portrait ? m + 180 * s : m - 6 * s;
+    this.toastTop = this.clockTop + 156 * s;
+    this.promptY = !this.touch ? this.H - m - 60 * s : portrait ? this.H - m - 2 * ar - 120 * s : this.H - m - 52 * s;
     this.moneyText.setPosition(m + 22 * s, m + 10 * s).setFontSize(52 * s);
     this.bagLabel.setPosition(m + 22 * s, m + 84 * s).setFontSize(22 * s);
     this.locationText.setPosition(m + 22 * s, m + 120 * s).setFontSize(24 * s);
-    this.clockText.setPosition(this.W / 2, m + 4 * s).setFontSize(46 * s);
+    this.clockText.setPosition(this.W / 2, this.clockTop + 10 * s).setFontSize(46 * s);
     this.warnLabel.setPosition(this.W - m - 120 * s, m + 6 * s).setFontSize(20 * s);
     this.pauseZone.setPosition(this.W - m - 44 * s, m + 44 * s).setSize(96 * s, 96 * s);
     this.promptText.setFontSize(30 * s);
     this.abilityText.setFontSize(24 * s);
 
-    const ar = 112 * s;
     this.actionZone.setPosition(this.W - m - ar - 30 * s, this.H - m - ar - 30 * s).setSize(ar * 2.2, ar * 2.2);
     this.actionText.setPosition(this.actionZone.x, this.actionZone.y).setFontSize(34 * s);
     const br = 76 * s;
@@ -144,7 +155,7 @@ export class HudScene extends Phaser.Scene {
   }
 
   private toastY(i: number) {
-    return (24 + 150 + i * 62) * this.ui;
+    return this.toastTop + i * 62 * this.ui;
   }
 
   // ---- per-frame ---------------------------------------------------------
@@ -166,7 +177,7 @@ export class HudScene extends Phaser.Scene {
     p.clear();
     p.fillStyle(COLORS.panel, 0.72);
     p.fillRoundedRect(m, m, 440 * s, 160 * s, 18 * s);
-    p.fillRoundedRect(W / 2 - 170 * s, m - 6 * s, 340 * s, 96 * s, 18 * s);
+    p.fillRoundedRect(W / 2 - 170 * s, this.clockTop, 340 * s, 96 * s, 18 * s);
     p.fillRoundedRect(W - m - 360 * s, m, 360 * s, 96 * s, 18 * s);
 
     const g = this.dynamic;
@@ -193,7 +204,7 @@ export class HudScene extends Phaser.Scene {
 
     // Shift progress with the coffee marker.
     const px = W / 2 - 130 * s;
-    const py = m + 64 * s;
+    const py = this.clockTop + 70 * s;
     const pw = 260 * s;
     g.fillStyle(0x000000, 0.5).fillRoundedRect(px, py, pw, 10 * s, 5 * s);
     g.fillStyle(0xe8914a, 1).fillRoundedRect(px, py, Math.max(10 * s, pw * h.progress), 10 * s, 5 * s);
@@ -216,8 +227,8 @@ export class HudScene extends Phaser.Scene {
     g.fillStyle(0xffffff, 1).fillRect(pz.x - 12 * s, pz.y - 14 * s, 8 * s, 28 * s).fillRect(pz.x + 4 * s, pz.y - 14 * s, 8 * s, 28 * s);
 
     // Prompt
-    const promptY = H - m - (this.touch ? 52 : 60) * s;
-    const promptX = this.touch ? W / 2 - 80 * s : W / 2;
+    const promptY = this.promptY;
+    const promptX = this.touch && !isPortrait(this.scale) ? W / 2 - 80 * s : W / 2;
     if (h.prompt) {
       const verb = !this.touch && !h.promptBad && (h.action === 'UNLOCK' || h.action === 'SCRAP') ? '[E]  ' : '';
       this.promptText.setText(verb + h.prompt).setColor(h.promptBad ? COLORS.warn : COLORS.text).setVisible(true);
@@ -306,7 +317,7 @@ export class HudScene extends Phaser.Scene {
       this.layout();
     }
     if (!this.touch || this.paused || over.length > 0) return;
-    if (p.x > this.W * 0.55 || p.y < 200 * this.ui) return;
+    if (p.x > this.W * 0.55 || p.y < Math.max(200 * this.ui, this.clockTop + 110 * this.ui)) return;
     this.stick = { id: p.id, ox: p.x, oy: p.y, x: p.x, y: p.y };
     controls.touchMove = { x: 0, y: 0 };
   }
@@ -372,21 +383,26 @@ export class HudScene extends Phaser.Scene {
     const W = this.W;
     const H = this.H;
     const dim = this.add.rectangle(W / 2, H / 2, W, H, 0x0b0d12, 0.72).setInteractive();
-    const title = this.add.text(W / 2, H / 2 - 300, 'PAUSED', textStyle(84, COLORS.copper)).setOrigin(0.5);
+    // Menu content is laid out around (0, 0) and scaled up on small screens.
+    const k = Math.max(1, this.ui * 0.9);
+    const title = this.add.text(0, -300, 'PAUSED', textStyle(84, COLORS.copper)).setOrigin(0.5);
     const help = this.touch
       ? 'Left thumb: move  ·  SCRAP button: scrap / unlock  ·  HIDE: ability'
       : 'WASD / arrows: move  ·  E or Space: scrap / unlock  ·  Q: ability  ·  Esc: pause';
-    const helpText = this.add.text(W / 2, H / 2 - 210, help, textStyle(26, COLORS.muted)).setOrigin(0.5);
-    const resume = new Button(this, W / 2, H / 2 - 90, 'RESUME', () => this.resume(), { width: 440 });
-    const restart = new Button(this, W / 2, H / 2 + 30, 'RESTART SHIFT', () => this.restartShift(), { width: 440, fill: 0x3d4558 });
-    const sound = new Button(this, W / 2, H / 2 + 150, isMuted() ? 'SOUND: OFF' : 'SOUND: ON', () => {
+    const helpText = this.add
+      .text(0, -210, help, textStyle(26, COLORS.muted, { align: 'center', wordWrap: { width: (W * 0.9) / k } }))
+      .setOrigin(0.5);
+    const resume = new Button(this, 0, -90, 'RESUME', () => this.resume(), { width: 440 });
+    const restart = new Button(this, 0, 30, 'RESTART SHIFT', () => this.restartShift(), { width: 440, fill: 0x3d4558 });
+    const sound = new Button(this, 0, 150, isMuted() ? 'SOUND: OFF' : 'SOUND: ON', () => {
       setMuted(!isMuted());
       updateSave((d) => (d.muted = isMuted()));
       sound.label.setText(isMuted() ? 'SOUND: OFF' : 'SOUND: ON');
       sfx.click();
     }, { width: 440, fill: 0x3d4558 });
-    const quit = new Button(this, W / 2, H / 2 + 270, 'QUIT TO MENU', () => this.quit(), { width: 440, fill: 0x3d4558 });
-    this.pauseMenu = this.add.container(0, 0, [dim, title, helpText, resume, restart, sound, quit]).setDepth(100);
+    const quit = new Button(this, 0, 270, 'QUIT TO MENU', () => this.quit(), { width: 440, fill: 0x3d4558 });
+    const content = this.add.container(W / 2, H / 2, [title, helpText, resume, restart, sound, quit]).setScale(k);
+    this.pauseMenu = this.add.container(0, 0, [dim, content]).setDepth(100);
   }
 
   private resume() {

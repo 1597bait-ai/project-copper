@@ -4,8 +4,8 @@ A flash-style top-down stealth game. Dalton strips the school for scrap (copper,
 aluminum, steel), hauls it out to the white van to sell, and stays out of Mr. Gravy's sight.
 Get caught carrying scrap three times and you're fired.
 
-Runs in any modern browser on **PC and phones** (landscape), and installs as an app from the
-browser ("Add to Home Screen").
+Runs in any modern browser on **PC and phones** (sideways or upright), and installs as an app
+from the browser ("Add to Home Screen").
 
 ## Play
 
@@ -69,9 +69,10 @@ src/art/sprites.ts placeholder vector art (SVG), rasterized at startup
 tools/             map generator, tileset renderer, e2e test
 ```
 
-**Screens:** the game is laid out at 1920×1080 and *expands* to fill any landscape screen
-(no black bars). Phones get a zoomed-in camera, bigger HUD, a floating joystick and big buttons.
-Portrait phones are asked to rotate.
+**Screens:** the game is laid out at 1920×1080 and *expands* to fill any screen (no black
+bars). The camera zoom and HUD size follow the screen's real pixel density, so phones get a
+zoomed-in view, a bigger HUD, a floating joystick and big buttons. Held upright, the menus
+stack into a column and the HUD rearranges.
 
 ### Add things
 

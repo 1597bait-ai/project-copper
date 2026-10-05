@@ -12,7 +12,7 @@ import { mergeContents, roundMoney, saleValue, type ScrapContents } from '../sys
 import { clockText } from '../systems/clock';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
 import { sfx } from '../systems/sfx';
-import { money, textStyle } from '../ui/theme';
+import { cssPerGamePixel, money, textStyle } from '../ui/theme';
 import { World } from '../world/World';
 
 export interface GameInit {
@@ -308,10 +308,9 @@ export class GameScene extends Phaser.Scene {
     });
   }
 
-  /** Zoom in on small physical screens (phones) so characters stay a comfortable size. */
+  /** Zoom in on small physical screens (phones, portrait) so a tile stays about 34 CSS pixels wide. */
   private fitCamera() {
-    const cssHeight = this.scale.displaySize.height;
-    this.cameras.main.setZoom(cssHeight < 520 ? 1.45 : cssHeight < 760 ? 1.2 : 1);
+    this.cameras.main.setZoom(Phaser.Math.Clamp(34 / (TILE * cssPerGamePixel(this.scale)), 1, 3));
   }
 
   /** Keys released while paused would otherwise stay "held". */
