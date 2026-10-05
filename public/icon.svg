@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1d2230"/>
+  <circle cx="256" cy="256" r="172" fill="#7a3d18"/>
+  <circle cx="256" cy="256" r="150" fill="none" stroke="#e0823d" stroke-width="22"/>
+  <circle cx="256" cy="256" r="112" fill="none" stroke="#f0a060" stroke-width="22"/>
+  <circle cx="256" cy="256" r="74" fill="none" stroke="#e0823d" stroke-width="22"/>
+  <circle cx="256" cy="256" r="40" fill="#1d2230"/>
+  <path d="M256 216 L420 120" stroke="#f0a060" stroke-width="20" stroke-linecap="round"/>
+  <text x="256" y="474" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-weight="900" font-size="62" fill="#ffffff">COPPER</text>
+</svg>
