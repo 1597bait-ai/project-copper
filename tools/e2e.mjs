@@ -177,9 +177,9 @@ async function open(name, contextOptions) {
   await G(`g.player.body.reset(${24.5 * T}, ${44.5 * T}); g.boss.timer = 0.1;`);
   await wait(0.3);
   const p0 = await G('return [g.boss.x, g.boss.y];');
-  await wait(3);
-  const p1 = await G('return [g.boss.x, g.boss.y];');
-  check('Mr. Gravy walks his patrol', Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) > T, { p0, p1 });
+  // He pauses at each stop, so give him a little while to get going, but he must keep moving.
+  const walked = await waitFor(`Math.hypot(g.boss.x - ${p0[0]}, g.boss.y - ${p0[1]}) > ${3 * T}`, 10);
+  check('Mr. Gravy walks his patrol (3+ tiles within 10s)', walked, { p0, p1: await G('return [g.boss.x, g.boss.y, g.boss.state];') });
 
   // The boiler room: locked, at the back of the building.
   await G(`g.player.body.reset(${13.5 * T}, ${11.4 * T});`);

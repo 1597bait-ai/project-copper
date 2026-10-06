@@ -77,12 +77,14 @@ export class Boss {
     this.chaseSpeed = BALANCE.tilesPerSecond(def.speed) * TILE;
   }
 
+  // Read the body: it moves in the physics step before update() runs, and the zone only catches up
+  // afterwards. A one-step-stale position makes him steer into door jambs on slow devices.
   get x(): number {
-    return this.zone.x;
+    return this.body.position.x + RADIUS;
   }
 
   get y(): number {
-    return this.zone.y;
+    return this.body.position.y + RADIUS;
   }
 
   get visionCone(): Cone {
