@@ -1,8 +1,8 @@
 import type { MaterialId } from './materials';
 
 // Everything Dalton can strip for scrap. One entry per sticky note on the design board.
-// To add a new fixture: add an entry here, draw a sprite in src/art/sprites.ts,
-// then place it on a map in Tiled (object layer "objects", type "fixture", name = id).
+// To add a new fixture: add an entry here, draw it in the art (src/art/), give it a map
+// character in src/world/legend.ts (FIXTURE_CHARS) and place it on a map.
 
 /** Trade type. Characters get a repair bonus on fixtures that match their specialty. */
 export type FixtureType = 'plumbing' | 'hvac' | 'free' | 'general';
@@ -105,6 +105,19 @@ export const FIXTURES: Record<string, FixtureDef> = {
     workSeconds: 3,
     solid: true,
     wallMounted: false,
+  },
+  electric_panel: {
+    id: 'electric_panel',
+    name: 'Electric Panel',
+    tier: 'very high',
+    type: 'general',
+    material: 'bare_bright', // copper bus bars: worth the trip to the back of the boiler room
+    scrap: 1,
+    range: [0.75, 1.25],
+    recharge: [60, 90],
+    workSeconds: 5,
+    solid: true,
+    wallMounted: true,
   },
   lamp: {
     id: 'lamp',

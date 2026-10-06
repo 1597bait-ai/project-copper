@@ -32,6 +32,8 @@ export interface ShiftSummary {
   lost: ScrapContents;
   warnings: number;
   character: string;
+  /** Paid by the sleepy coworker to keep quiet (already included in `earned`). */
+  hushMoney: number;
   /** Set when the shift was played on a custom map, so "next shift" stays on it. */
   mapText?: string;
 }
@@ -57,6 +59,18 @@ export interface HudState {
   ability: { name: string; key: string; activeLeft: number; duration: number; cooldownLeft: number; cooldown: number } | null;
   danger: number;
   characterName: string;
+  /** Word got around after a student reported you: every student is on high alert until it runs out. */
+  alert: { left: number; total: number } | null;
+}
+
+/** A line of dialog shown in the HUD's dialog box (emitted as the 'dialog' event). */
+export interface DialogLine {
+  speaker: string;
+  text: string;
+  /** How long it stays up (a tap or the action key closes it sooner). */
+  seconds: number;
+  /** Texture key of a portrait, e.g. 'sleepy_coworker_big'. */
+  portrait?: string;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -336,6 +350,7 @@ export class GameScene extends Phaser.Scene {
       lost: this.lost,
       warnings: this.warnings,
       character: this.characterId,
+      hushMoney: 0,
       mapText: this.mapText,
     };
     this.cameras.main.fadeOut(500, 20, 22, 28);
@@ -523,6 +538,11 @@ export class GameScene extends Phaser.Scene {
     this.events.emit('toast', text, color, duration);
   }
 
+  /** Shows a line in the HUD dialog box. Doesn't pause the game. */
+  dialog(line: DialogLine): void {
+    this.events.emit('dialog', line);
+  }
+
   floatText(x: number, y: number, text: string, color: string, duration = 1200): void {
     const t = this.add.text(x, y, text, textStyle(30, color)).setOrigin(0.5).setDepth(30);
     this.tweens.add({ targets: t, y: y - 70, alpha: { from: 1, to: 0 }, ease: 'Cubic.Out', duration, onComplete: () => t.destroy() });
@@ -546,6 +566,7 @@ export class GameScene extends Phaser.Scene {
       ability: null,
       danger: 0,
       characterName: p.character.name,
+      alert: null,
     };
   }
 

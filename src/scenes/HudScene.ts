@@ -4,7 +4,7 @@ import { controls } from '../input/Controls';
 import { isMuted, setMuted, sfx, unlockAudio } from '../systems/sfx';
 import { updateSave } from '../systems/save';
 import { Button, COLORS, cssPerGamePixel, isPortrait, isTouchDevice, money, setTextColor, textStyle } from '../ui/theme';
-import type { GameScene, HudState } from './GameScene';
+import type { DialogLine, GameScene, HudState } from './GameScene';
 
 const ABILITY_SHORT: Record<string, string> = { student_disguise: 'HIDE', look_busy: 'LOOK\nBUSY' };
 
@@ -87,10 +87,12 @@ export class HudScene extends Phaser.Scene {
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
     this.gameScene.events.on('toast', this.showToast, this);
+    this.gameScene.events.on('dialog', this.showDialog, this);
     this.gameScene.events.on('paused', this.showPause, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this);
       this.gameScene.events.off('toast', this.showToast, this);
+      this.gameScene.events.off('dialog', this.showDialog, this);
       this.gameScene.events.off('paused', this.showPause, this);
       controls.reset();
     });
@@ -350,6 +352,11 @@ export class HudScene extends Phaser.Scene {
   }
 
   // ---- toasts ------------------------------------------------------------
+
+  /** Placeholder: dialog as a toast until the dialog box exists. */
+  private showDialog(line: DialogLine) {
+    this.showToast(`${line.speaker}: ${line.text}`, '#f6f1e5', line.seconds * 1000);
+  }
 
   private showToast(text: string, color: string, duration: number) {
     const t = this.add

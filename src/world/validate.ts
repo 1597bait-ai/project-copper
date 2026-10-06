@@ -21,13 +21,14 @@ export function wallGrid(map: ParsedMap): Grid {
   return grid;
 }
 
-/** Where people can walk: walls, solid fixtures and the van block; doors count as open unless asked. */
+/** Where people can walk: walls, solid fixtures, decorations and the van block; doors count as open unless asked. */
 export function walkGrid(map: ParsedMap, doorsLocked = false): Grid {
   const grid = wallGrid(map);
   for (const f of map.fixtures) if (FIXTURES[f.id]?.solid) grid.set(f.x, f.y, true);
   const fill = (r: { x: number; y: number; w: number; h: number }) => {
     for (let y = r.y; y < r.y + r.h; y++) for (let x = r.x; x < r.x + r.w; x++) grid.set(x, y, true);
   };
+  map.decor.forEach(fill);
   if (map.van) fill(map.van);
   if (doorsLocked) map.doors.forEach(fill);
   return grid;

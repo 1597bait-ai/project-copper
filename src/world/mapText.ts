@@ -7,7 +7,8 @@
 // See src/world/legend.ts for what each character means. Objects (fixtures, spawns, the van...)
 // sit on the floor of whatever is next to them, so you never have to pick a floor for them.
 
-import { FIXTURE_CHARS, OBJECT_BY_CHAR, OBJECTS, ROOM_NAMES, TILES, TILE_INDEX, isFloorChar, isWallChar, tileByChar, type RoomKind } from './legend';
+import { DECOR } from '../config/decor';
+import { DECOR_CHARS, FIXTURE_CHARS, OBJECT_BY_CHAR, OBJECTS, ROOM_NAMES, TILES, TILE_INDEX, isFloorChar, isWallChar, tileByChar, type RoomKind } from './legend';
 
 export interface TilePoint {
   x: number;
@@ -40,6 +41,8 @@ export interface ParsedMap {
   van: TileRect | null;
   doors: TileRect[];
   fixtures: { id: string; x: number; y: number }[];
+  /** Plants, trash cans, trees, cars (see src/config/decor.ts). Solid but see-through. */
+  decor: ({ id: string } & TileRect)[];
   /** Mr. Gravy's route, in stop order. */
   patrol: TilePoint[];
   /** The digit written on each route stop (parallel to `patrol`; gaps like 1,2,5 are allowed). */
@@ -141,6 +144,7 @@ export function parseMap(text: string): ParsedMap {
   let boss: TilePoint | null = null;
   const students: TilePoint[] = [];
   const fixtures: ParsedMap['fixtures'] = [];
+  const decor: ParsedMap['decor'] = [];
   const stops = new Map<number, TilePoint>();
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
@@ -161,6 +165,11 @@ export function parseMap(text: string): ParsedMap {
         case 'fixture':
           fixtures.push({ id: FIXTURE_CHARS[def.char], x, y });
           break;
+        case 'decor': {
+          const id = DECOR_CHARS[def.char];
+          if (DECOR[id].w === 1 && DECOR[id].h === 1) decor.push({ id, x, y, w: 1, h: 1 });
+          break;
+        }
         case 'patrol': {
           const n = Number(def.char);
           if (stops.has(n)) problems.push(`Route stop ${n} appears more than once`);
@@ -177,9 +186,9 @@ export function parseMap(text: string): ParsedMap {
   const patrolStops = ordered.map(([n]) => n);
 
   // Van and doors: group touching cells into rectangles.
-  const groups = (ch: string): TileRect[] => {
+  const groups = (ch: string): (TileRect & { filled: boolean })[] => {
     const seen = new Set<number>();
-    const out: TileRect[] = [];
+    const out: (TileRect & { filled: boolean })[] = [];
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         if (at(x, y) !== ch || seen.has(y * width + x)) continue;
@@ -207,17 +216,31 @@ export function parseMap(text: string): ParsedMap {
         const minY = Math.min(...cells.map((c) => c.y));
         const w = Math.max(...cells.map((c) => c.x)) - minX + 1;
         const h = Math.max(...cells.map((c) => c.y)) - minY + 1;
-        if (cells.length !== w * h) problems.push(`"${ch}" at ${minX},${minY} isn't a filled rectangle`);
-        out.push({ x: minX, y: minY, w, h });
+        const filled = cells.length === w * h;
+        if (!filled) problems.push(`"${ch}" at ${minX},${minY} isn't a filled rectangle`);
+        out.push({ x: minX, y: minY, w, h, filled });
       }
     }
     return out;
   };
   const vans = groups('V');
   if (vans.length > 1) problems.push(`More than one van — using the one at ${vans[0].x},${vans[0].y}`);
-  const van = vans[0] ?? null;
+  const van = vans[0] ? { x: vans[0].x, y: vans[0].y, w: vans[0].w, h: vans[0].h } : null;
   if (van && Math.min(van.w, van.h) < 2) problems.push('The van needs at least a 2x2 block of V (2x4 or 4x2 looks right)');
-  const doors = groups('L');
+  const doors = groups('L').map(({ x, y, w, h }) => ({ x, y, w, h }));
+  // Big decorations (cars): each block of their character is cut into w x h pieces.
+  for (const [ch, id] of Object.entries(DECOR_CHARS)) {
+    const { w, h, name } = DECOR[id];
+    if (w === 1 && h === 1) continue;
+    for (const r of groups(ch)) {
+      if (!r.filled) continue;
+      if (r.w % w || r.h % h) {
+        problems.push(`${name}s are ${w}x${h} blocks of "${ch}": the one at ${r.x},${r.y} is ${r.w}x${r.h}`);
+        continue;
+      }
+      for (let y = r.y; y < r.y + r.h; y += h) for (let x = r.x; x < r.x + r.w; x += w) decor.push({ id, x, y, w, h });
+    }
+  }
 
   // Rooms: connected floor of the same kind. Walls and doors separate rooms.
   const roomAt = new Int16Array(width * height).fill(-1);
@@ -269,7 +292,7 @@ export function parseMap(text: string): ParsedMap {
     else problems.push(`"@ ${n.x},${n.y} ${n.name}" doesn't point at a room`);
   }
 
-  return { width, height, rows, floor, walls, player, boss, students, van, doors, fixtures, patrol, patrolStops, rooms, roomAt, names, problems };
+  return { width, height, rows, floor, walls, player, boss, students, van, doors, fixtures, decor, patrol, patrolStops, rooms, roomAt, names, problems };
 }
 
 /** The comment block written at the top of every saved map, generated from the legend. */

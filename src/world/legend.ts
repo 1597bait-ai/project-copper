@@ -2,6 +2,8 @@
 // The tile ORDER must match the art in tools/tiles.mjs (the PNG is cut up by position);
 // src/world/legend.test.ts checks that.
 
+import { DECOR } from '../config/decor';
+
 export type TileLayer = 'floor' | 'walls';
 
 /** Room kinds drive the HUD location name and where students like to hang out. */
@@ -31,7 +33,7 @@ export interface TileDef {
 export const TILES: TileDef[] = [
   { char: '.', name: 'Hallway floor', layer: 'floor', room: 'hallway' },
   { char: ',', name: 'Classroom carpet', layer: 'floor', room: 'classroom' },
-  { char: '~', name: 'Restroom tile', layer: 'floor', room: 'restroom' },
+  { char: '~', name: 'Restroom tile (blue)', layer: 'floor', room: 'restroom' },
   { char: 'b', name: 'Boiler room concrete', layer: 'floor', room: 'boiler' },
   { char: 'o', name: 'Office carpet', layer: 'floor', room: 'office' },
   { char: 'j', name: "Janitor's concrete", layer: 'floor', room: 'janitor' },
@@ -45,6 +47,8 @@ export const TILES: TileDef[] = [
   { char: '=', name: 'Lobby terrazzo', layer: 'floor', room: 'lobby' },
   { char: 'k', name: 'Storage plywood', layer: 'floor', room: 'storage' },
   { char: 'n', name: 'Lounge linoleum', layer: 'floor', room: 'lounge' },
+  { char: 'W', name: 'Whiteboard wall', layer: 'walls', collides: true },
+  { char: '^', name: 'Restroom tile (pink)', layer: 'floor', room: 'restroom' },
 ];
 
 export const TILE_INDEX: Record<string, number> = Object.fromEntries(TILES.map((t, i) => [t.char, i]));
@@ -61,9 +65,18 @@ export const FIXTURE_CHARS: Record<string, string> = {
   c: 'abandoned_copper_pile',
   d: 'desk',
   l: 'lamp',
+  e: 'electric_panel',
 };
 
-export type ObjectKind = 'player' | 'boss' | 'student' | 'van' | 'door' | 'patrol' | 'fixture';
+/** Decorations: solid (nobody walks through them) but see-through. Map character -> id in src/config/decor.ts. */
+export const DECOR_CHARS: Record<string, string> = {
+  '*': 'plant',
+  u: 'trash_can',
+  T: 'tree',
+  C: 'car',
+};
+
+export type ObjectKind = 'player' | 'boss' | 'student' | 'van' | 'door' | 'patrol' | 'fixture' | 'decor';
 
 export interface ObjectDef {
   char: string;
@@ -80,6 +93,7 @@ export const OBJECTS: ObjectDef[] = [
   { char: 'L', kind: 'door', name: 'Locked door' },
   ...'123456789'.split('').map((d) => ({ char: d, kind: 'patrol' as const, name: `Mr. Gravy's route, stop ${d}` })),
   ...Object.entries(FIXTURE_CHARS).map(([char, id]) => ({ char, kind: 'fixture' as const, name: id })),
+  ...Object.entries(DECOR_CHARS).map(([char, id]) => ({ char, kind: 'decor' as const, name: DECOR[id].mapName })),
 ];
 
 export const OBJECT_BY_CHAR: Record<string, ObjectDef> = Object.fromEntries(OBJECTS.map((o) => [o.char, o]));

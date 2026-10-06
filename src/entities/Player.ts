@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { BALANCE, TILE } from '../config/balance';
 import { ABILITIES, type AbilityDef, type CharacterDef } from '../config/characters';
 import { Bag } from '../systems/Bag';
+import { CharacterView } from './CharacterView';
 
 export const PLAYER_RADIUS = TILE * 0.3;
 
@@ -16,10 +17,7 @@ export interface Channel {
 export class Player {
   readonly zone: Phaser.GameObjects.Zone;
   readonly body: Phaser.Physics.Arcade.Body;
-  private readonly view: Phaser.GameObjects.Container;
-  private readonly sprite: Phaser.GameObjects.Image;
-  private readonly sack: Phaser.GameObjects.Image;
-  private readonly shadow: Phaser.GameObjects.Image;
+  readonly view: CharacterView;
   readonly bag: Bag;
   readonly speed: number;
   readonly ability: AbilityDef | null;
@@ -40,10 +38,7 @@ export class Player {
     this.body.setCircle(PLAYER_RADIUS);
     this.body.setCollideWorldBounds(true);
 
-    this.shadow = scene.add.image(x, y + 6, 'shadow').setScale(0.9).setDepth(9);
-    this.sack = scene.add.image(-20, 0, 'sack').setVisible(false);
-    this.sprite = scene.add.image(0, 0, character.sprite);
-    this.view = scene.add.container(x, y, [this.sack, this.sprite]).setDepth(10);
+    this.view = new CharacterView(scene, character.sprite, x, y);
 
     this.bag = new Bag(BALANCE.bagCapacity(character.stats.carry));
     this.speed = BALANCE.tilesPerSecond(character.stats.speed) * TILE;
@@ -126,36 +121,22 @@ export class Player {
 
   syncView(time: number): void {
     const moving = this.body.speed > 5;
-    this.view.setPosition(this.x, this.y);
-    this.shadow.setPosition(this.x, this.y + 6);
-    // Smoothly turn toward the facing direction, with a little waddle while walking.
-    const current = this.sprite.rotation;
-    const delta = Phaser.Math.Angle.Wrap(this.facing - current);
-    this.sprite.rotation = current + delta * 0.35;
-    this.sprite.setScale(moving ? 1 + Math.sin(time / 70) * 0.03 : 1);
-    if (this.channel) this.sprite.rotation = this.facing + Math.sin(time / 45) * 0.12;
-
     const fill = this.bag.capacity > 0 ? this.bag.total / this.bag.capacity : 0;
-    const showSack = fill > 0 && !this.disguised;
-    this.sack.setVisible(showSack);
-    if (showSack) {
-      const back = this.sprite.rotation + Math.PI;
-      this.sack.setPosition(Math.cos(back) * 22, Math.sin(back) * 22).setScale(0.65 + fill * 0.55);
-    }
+    this.view.setCarry(this.disguised ? 0 : fill);
+    this.view.update(this.x, this.y, this.facing, moving, time, { working: this.channel !== null });
     this.view.setAlpha(this.disguised ? 0.92 : 1);
   }
 
   private refreshLook(): void {
     const disguiseKey = `${this.character.sprite}_disguise`;
-    const useDisguise = this.disguised && this.sprite.scene.textures.exists(disguiseKey);
-    this.sprite.setTexture(useDisguise ? disguiseKey : this.character.sprite);
-    if (this.lookingBusy) this.sprite.setTint(0xfff2a8);
-    else this.sprite.clearTint();
+    const useDisguise = this.disguised && this.zone.scene.textures.exists(disguiseKey);
+    this.view.setKey(useDisguise ? disguiseKey : this.character.sprite);
+    if (this.lookingBusy) this.view.setTint(0xfff2a8);
+    else this.view.clearTint();
   }
 
   destroy(): void {
     this.view.destroy();
-    this.shadow.destroy();
     this.zone.destroy();
   }
 }

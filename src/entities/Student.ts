@@ -7,6 +7,7 @@ import { pickWanderTarget, wanderArea } from '../systems/wander';
 import { textStyle } from '../ui/theme';
 import type { World } from '../world/World';
 import type { Boss } from './Boss';
+import { CharacterView } from './CharacterView';
 import type { Player } from './Player';
 
 const RADIUS = TILE * 0.28;
@@ -38,9 +39,7 @@ export type StudentEvent = 'saw' | 'reported';
 export class Student {
   readonly zone: Phaser.GameObjects.Zone;
   readonly body: Phaser.Physics.Arcade.Body;
-  private readonly view: Phaser.GameObjects.Container;
-  private readonly sprite: Phaser.GameObjects.Image;
-  private readonly shadow: Phaser.GameObjects.Image;
+  readonly view: CharacterView;
   private readonly mark: Phaser.GameObjects.Text;
   private readonly cone: Phaser.GameObjects.Graphics;
   /** Sits on the student; holds the tail and the body, which slides sideways to stay on screen. */
@@ -93,9 +92,7 @@ export class Student {
 
     const looks = def.variants?.length ? def.variants : [def.sprite];
     this.cone = scene.add.graphics().setDepth(7);
-    this.shadow = scene.add.image(x, y + 5, 'shadow').setScale(SCALE * 0.9).setDepth(9);
-    this.sprite = scene.add.image(0, 0, looks[index % looks.length]).setScale(SCALE);
-    this.view = scene.add.container(x, y, [this.sprite]).setDepth(10);
+    this.view = new CharacterView(scene, looks[index % looks.length], x, y, { scale: SCALE });
     this.mark = scene.add
       .text(x, y, '', { fontFamily: 'Arial Black, Arial', fontSize: '48px', color: '#ffa53d', stroke: '#14161c', strokeThickness: 7 })
       .setOrigin(0.5, 1)
@@ -191,18 +188,14 @@ export class Student {
   }
 
   syncView(time: number, view: Phaser.Geom.Rectangle): void {
-    this.view.setPosition(this.x, this.y);
-    this.shadow.setPosition(this.x, this.y + 5);
-    this.sprite.rotation = this.facing;
-    const walking = this.body.speed > 5;
-    const bounce = this.state === 'tattle' ? 60 : 90;
-    this.sprite.setScale(walking ? SCALE * (1 + Math.sin(time / bounce) * 0.04) : SCALE);
+    this.view.update(this.x, this.y, this.facing, this.body.speed > 5, time, { running: this.state === 'tattle' });
 
     const telling = this.state === 'tattle' || this.state === 'report';
     const noticing = this.state === 'notice';
     this.mark.setText(this.bubble.visible ? '' : telling ? '!' : noticing ? '?' : '');
-    this.mark.setPosition(this.x, this.y - 30 + Math.sin(time / 110) * 4);
-    this.bubble.setPosition(this.x, this.y - 44);
+    const head = this.y + this.view.headTop;
+    this.mark.setPosition(this.x, head + 2 + Math.sin(time / 110) * 4);
+    this.bubble.setPosition(this.x, head - 12);
     if (this.bubble.visible) {
       // Slide the body sideways to keep it on screen (phones zoom in a lot), but never off its tail.
       const half = this.bubbleWidth / 2;

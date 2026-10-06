@@ -185,13 +185,58 @@ describe('paint', () => {
     expect(paint(SMALL, 4, 3, 'pan').changed).toBe(false);
   });
 
+  it('stamps a 2x2 car with the tapped tile at its top-left, and removes it whole', () => {
+    const r = paint(SMALL, 7, 6, 'C');
+    expect(cellsOf(r.rows, 'C')).toEqual([
+      { x: 7, y: 6 },
+      { x: 8, y: 6 },
+      { x: 7, y: 7 },
+      { x: 8, y: 7 },
+    ]);
+    expect(parseMap(r.rows.join('\n')).decor).toContainEqual({ id: 'car', x: 7, y: 6, w: 2, h: 2 });
+    expect(count(paint(r.rows, 8, 7, ERASER).rows, 'C')).toBe(0);
+    const walled = paint(r.rows, 7, 7, '#');
+    expect(count(walled.rows, 'C')).toBe(0);
+    expect(walled.rows[7][7]).toBe('#');
+    // Pushed inside the map, and never over a wall.
+    expect(paint(SMALL, 8, 8, 'C').changed).toBe(false);
+    expect(paint(SMALL, 8, 8, 'C').message).toContain('open ground');
+  });
+
+  it('cuts a block of cars into 2x2 cars and removes only the one touched', () => {
+    const lot = ['pppppp', 'pCCCCp', 'pCCCCp', 'pppppp'];
+    expect(parseMap(lot.join('\n')).decor.map((d) => d.x)).toEqual([1, 3]);
+    expect(paint(lot, 4, 2, ERASER).rows).toEqual(['pppppp', 'pCCppp', 'pCCppp', 'pppppp']);
+    // A new car stamped over half of an old one removes all of the old one.
+    expect(paint(lot, 0, 1, 'C').rows).toEqual(['pppppp', 'CCpCCp', 'CCpCCp', 'pppppp']);
+    expect(parseMap(['pCCCp', 'pCCCp'].join('\n')).problems.join()).toContain('2x2');
+  });
+
+  it('places single-tile decorations like any other thing', () => {
+    const r = paint(SMALL, 7, 7, '*');
+    expect(parseMap(r.rows.join('\n')).decor).toEqual([{ id: 'plant', x: 7, y: 7, w: 1, h: 1 }]);
+    expect(paint(SMALL, 1, 4, 'u').changed).toBe(false); // not into a wall
+  });
+
   it('keeps the shipped map playable through a typical edit', () => {
-    let rows = parseMap(DEFAULT_MAP.text).rows;
-    rows = paint(rows, 20, 11, 'c').rows;
-    rows = paint(rows, 10, 45, VAN).rows;
-    const map = parseMap(serializeMap(rows));
+    const start = parseMap(DEFAULT_MAP.text);
+    let rows = start.rows;
+    // A copper pile next to the player start, and the van stamped again where it already is.
+    const p = start.player!;
+    const spot = [
+      [1, 0],
+      [-1, 0],
+      [0, 1],
+      [0, -1],
+    ].find(([dx, dy]) => /[.,~bojpgn=k_]/.test(rows[p.y + dy][p.x + dx]))!;
+    rows = paint(rows, p.x + spot[0], p.y + spot[1], 'c').rows;
+    const v = start.van!;
+    const turned = v.h > v.w;
+    rows = paint(rows, v.x + (turned ? 0 : 1), v.y + (turned ? 1 : 0), VAN, { vanRotated: turned }).rows;
+    const map = parseMap(serializeMap(rows, start.names));
     expect(validateMap(map).errors).toEqual([]);
-    expect(map.van).toEqual({ x: 9, y: 45, w: 4, h: 2 });
+    expect(map.van).toEqual(v);
+    expect(map.fixtures.length).toBe(start.fixtures.length + 1);
   });
 });
 

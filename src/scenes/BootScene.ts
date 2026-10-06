@@ -1,12 +1,11 @@
 import Phaser from 'phaser';
-import { rasterizeSprites } from '../art/rasterize';
-import { allSprites } from '../art/sprites';
+import { generateArt } from '../art';
 import { setMuted } from '../systems/sfx';
 import { loadSave } from '../systems/save';
-import { textStyle } from '../ui/theme';
+import { loadFonts, textStyle } from '../ui/theme';
 import { TILESET_TEXTURE, TILESET_URL } from '../world/maps';
 
-/** Loads the tileset and turns the SVG art into textures, then opens the menu. */
+/** Loads the tileset, the font and draws the art into textures, then opens the menu. */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -20,7 +19,7 @@ export class BootScene extends Phaser.Scene {
 
   async create(): Promise<void> {
     setMuted(loadSave().muted);
-    await rasterizeSprites(this.textures, allSprites());
+    await Promise.all([generateArt(this.textures), loadFonts()]);
     this.scene.start('Menu');
   }
 }

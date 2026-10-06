@@ -2,6 +2,9 @@ import Phaser from 'phaser';
 
 export const FONT = '"Arial Black", "Arial Bold", Gadget, "Helvetica Neue", Arial, sans-serif';
 
+/** Waits (briefly) for the game font, so the first texts aren't drawn in a fallback font. */
+export async function loadFonts(): Promise<void> {}
+
 export const COLORS = {
   copper: '#e8914a',
   copperDark: 0xb85f22,

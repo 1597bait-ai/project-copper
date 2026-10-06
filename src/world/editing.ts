@@ -2,8 +2,9 @@
 // grid rows (see src/world/mapText.ts for the text format); nothing here touches Phaser, so
 // every rule is unit tested in editing.test.ts.
 
+import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
-import { FIXTURE_CHARS, OBJECT_BY_CHAR, isFloorChar, isWallChar, tileByChar } from './legend';
+import { DECOR_CHARS, FIXTURE_CHARS, OBJECT_BY_CHAR, isFloorChar, isWallChar, tileByChar } from './legend';
 import { parseMap, serializeMap, type ParsedMap, type TilePoint } from './mapText';
 
 /** Tool "characters" that aren't map characters (map characters are always one letter). */
@@ -17,6 +18,54 @@ export const VAN_W = 4;
 export const VAN_H = 2;
 
 const STOPS = '123456789';
+
+/** Decorations bigger than one tile (cars): map character -> size. Stamped whole, removed whole. */
+const BLOCKS: Record<string, { w: number; h: number }> = Object.fromEntries(
+  Object.entries(DECOR_CHARS)
+    .filter(([, id]) => DECOR[id].w * DECOR[id].h > 1)
+    .map(([ch, id]) => [ch, { w: DECOR[id].w, h: DECOR[id].h }]),
+);
+
+/** True for tools that stamp a whole multi-tile decoration (a car). */
+export const isBlockTool = (ch: string) => ch in BLOCKS;
+
+/**
+ * The cells of the one big decoration (a w x h piece of a block of its character) covering x,y.
+ * A block of cars is cut into pieces from its top-left corner, the same way parseMap does it.
+ */
+export function blockPiece(rows: readonly string[], x: number, y: number): TilePoint[] {
+  const ch = rows[y]?.[x];
+  const size = ch === undefined ? undefined : BLOCKS[ch];
+  if (!size) return [];
+  const seen = new Set<string>([`${x},${y}`]);
+  const stack: TilePoint[] = [{ x, y }];
+  let minX = x;
+  let minY = y;
+  let maxX = x;
+  let maxY = y;
+  while (stack.length) {
+    const c = stack.pop()!;
+    [minX, minY, maxX, maxY] = [Math.min(minX, c.x), Math.min(minY, c.y), Math.max(maxX, c.x), Math.max(maxY, c.y)];
+    for (const [nx, ny] of [
+      [c.x + 1, c.y],
+      [c.x - 1, c.y],
+      [c.x, c.y + 1],
+      [c.x, c.y - 1],
+    ]) {
+      if (rows[ny]?.[nx] === ch && !seen.has(`${nx},${ny}`)) {
+        seen.add(`${nx},${ny}`);
+        stack.push({ x: nx, y: ny });
+      }
+    }
+  }
+  const px = minX + Math.floor((x - minX) / size.w) * size.w;
+  const py = minY + Math.floor((y - minY) / size.h) * size.h;
+  const out: TilePoint[] = [];
+  for (let cy = py; cy < Math.min(py + size.h, maxY + 1); cy++) {
+    for (let cx = px; cx < Math.min(px + size.w, maxX + 1); cx++) if (rows[cy][cx] === ch) out.push({ x: cx, y: cy });
+  }
+  return out;
+}
 
 export interface PaintOptions {
   /** Stamp the van 2 wide and 4 tall instead of 4 wide and 2 tall. */
@@ -95,10 +144,13 @@ export function nextRouteStop(rows: readonly string[]): number | null {
 
 /** Where a van stamped at x,y lands: around the tapped tile, pushed inside the map. Null if it can't fit. */
 export function vanRect(rows: readonly string[], x: number, y: number, rotated = false): { x: number; y: number; w: number; h: number } | null {
+  return blockRect(rows, x, y, rotated ? VAN_H : VAN_W, rotated ? VAN_W : VAN_H);
+}
+
+/** Where a w x h block stamped at x,y lands: around the tapped tile, pushed inside the map. Null if it can't fit. */
+function blockRect(rows: readonly string[], x: number, y: number, w: number, h: number): { x: number; y: number; w: number; h: number } | null {
   const height = rows.length;
   const width = rows[0]?.length ?? 0;
-  const w = rotated ? VAN_H : VAN_W;
-  const h = rotated ? VAN_W : VAN_H;
   if (w > width || h > height) return null;
   const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v));
   return { x: clamp(x - Math.floor((w - 1) / 2), width - w), y: clamp(y - Math.floor((h - 1) / 2), height - h), w, h };
@@ -113,7 +165,8 @@ export function vanRect(rows: readonly string[], x: number, y: number, rotated =
  * - VAN removes the old van and stamps a new 4x2 (or 2x4) block of V around x,y.
  * - ERASER removes a thing (leaving the floor that was under it) or turns a floor/wall into hallway.
  *   A removed van leaves the floor most common around it.
- * - Touching any cell of the van with another tool removes the whole van, so it never ends up broken.
+ * - Big decorations (cars) are stamped whole, w x h with the tapped tile at their top-left (pushed inside the map).
+ * - Touching any cell of the van or a car with another tool removes the whole van or car, so it never ends up broken.
  * - Things (except locked doors) can't go into a wall: that would leave a gap people walk and see through.
  * - Outside the map nothing happens.
  */
@@ -133,21 +186,37 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
       for (let cx = 0; cx < row.length; cx++) if (row[cx] === target) grid[cy][cx] = around ?? floorUnder(rows, cx, cy);
     });
   };
+  /** Removes whatever big thing covers cx,cy (the van, or one car), so none is ever left broken. */
+  const removeBig = (cx: number, cy: number) => {
+    const ch = rows[cy][cx];
+    if (ch === VAN) removeAll(VAN);
+    else for (const c of blockPiece(rows, cx, cy)) clear(c.x, c.y);
+  };
   const put = (value: string) => {
-    if (current === VAN && value !== VAN) removeAll(VAN);
+    removeBig(x, y);
     grid[y][x] = value;
   };
 
   const intoWall = isWallChar(current) && ch !== 'L' && ch !== ERASER && (ch === VAN || ch === ROUTE_STOP || isObject(ch));
-  if (intoWall && ch !== VAN) return { ...unchanged, message: 'Put that on the floor next to the wall, not in the wall' };
+  if (intoWall && ch !== VAN && !isBlockTool(ch)) return { ...unchanged, message: 'Put that on the floor next to the wall, not in the wall' };
 
-  if (ch === VAN) {
+  if (isBlockTool(ch)) {
+    const { w, h } = BLOCKS[ch];
+    const r = blockRect(rows, x, y, w, h);
+    if (!r) return { ...unchanged, message: 'The map is too small for that' };
+    for (let cy = r.y; cy < r.y + r.h; cy++) {
+      for (let cx = r.x; cx < r.x + r.w; cx++) if (isWallChar(rows[cy][cx])) return { ...unchanged, message: 'That needs open ground, with no walls under it' };
+    }
+    for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) removeBig(cx, cy);
+    for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) grid[cy][cx] = ch;
+  } else if (ch === VAN) {
     const r = vanRect(rows, x, y, opts.vanRotated);
     if (!r) return { ...unchanged, message: 'The map is too small for the van' };
     for (let cy = r.y; cy < r.y + r.h; cy++) {
       for (let cx = r.x; cx < r.x + r.w; cx++) if (isWallChar(rows[cy][cx])) return { ...unchanged, message: 'The van needs open ground, with no walls under it' };
     }
     removeAll(VAN);
+    for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) if (isBlockTool(rows[cy][cx])) removeBig(cx, cy);
     for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) grid[cy][cx] = VAN;
   } else if (ch === ROUTE_STOP) {
     if (STOPS.includes(current)) return { ...unchanged, message: `Route stop ${current} is already here` };
@@ -156,7 +225,7 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
     put(String(next));
     message = `Route stop ${next}`;
   } else if (ch === ERASER) {
-    if (current === VAN) removeAll(VAN);
+    if (current === VAN || isBlockTool(current)) removeBig(x, y);
     else if (isObject(current)) clear(x, y);
     else grid[y][x] = '.';
   } else if (ch === 'P' || ch === 'G' || (ch.length === 1 && STOPS.includes(ch))) {
@@ -291,6 +360,8 @@ export function reconcileNames(before: readonly string[], after: readonly string
 export function cellName(ch: string): string {
   const fixture = FIXTURE_CHARS[ch];
   if (fixture) return FIXTURES[fixture]?.name ?? fixture;
+  const decor = DECOR_CHARS[ch];
+  if (decor) return DECOR[decor]?.name ?? decor;
   const obj = OBJECT_BY_CHAR[ch];
   if (obj?.kind === 'van') return 'Van';
   if (obj?.kind === 'patrol') return `Route stop ${ch}`;

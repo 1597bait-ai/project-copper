@@ -178,6 +178,23 @@ export const TILES = [
       `<rect width="32" height="32" fill="#7a9a86"/><rect x="32" y="32" width="32" height="32" fill="#7a9a86"/>` +
       speckles(14, 30, ['#c6c0ae', '#6a8a76'], 0.6, 1.2, 0.6),
   },
+  {
+    name: 'whiteboard wall',
+    char: 'W',
+    layer: 'walls',
+    collides: true,
+    svg: () => rect('#2d3340') + `<rect x="6" y="14" width="52" height="34" fill="#f4f6f8" stroke="#9aa3ad" stroke-width="3"/>`,
+  },
+  {
+    name: 'restroom tile (pink)',
+    char: '^',
+    layer: 'floor',
+    svg: () => {
+      let s = rect('#f3e3ea');
+      for (let i = 0; i <= 64; i += 16) s += `<path d="M${i} 0V64M0 ${i}H64" stroke="#d7b8c6" stroke-width="1.5"/>`;
+      return s;
+    },
+  },
 ];
 
 export const tileIndexByChar = Object.fromEntries(TILES.map((t, i) => [t.char, i]));

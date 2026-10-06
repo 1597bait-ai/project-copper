@@ -13,7 +13,7 @@ export interface NpcDef {
 export const NPCS: Record<string, NpcDef> = {
   mr_gravy: { id: 'mr_gravy', name: 'Mr. Gravy', speed: 2, awareness: 2, sprite: 'mr_gravy' },
   student: { id: 'student', name: 'Student', speed: 1, awareness: 1, sprite: 'student', variants: ['student', 'student_b', 'student_c'] },
+  // Design board: very, very sleepy, always asleep at work, suffers from intense very real
+  // migraines. Naps under desks; scrap the wrong desk and he pays you to keep quiet.
+  sleepy_coworker: { id: 'sleepy_coworker', name: 'Sleepy Coworker', speed: 0.5, awareness: 0, sprite: 'sleepy_coworker' },
 };
-
-// Planned (design board): the Sleepy Coworker — very, very sleepy, always asleep at work,
-// suffers from intense very real migraines. If found, the player recovers 1 warning.

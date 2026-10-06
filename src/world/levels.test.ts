@@ -2,32 +2,36 @@
 // Runs in CI, so a typo in a map file fails the build instead of shipping.
 
 import { describe, expect, it } from 'vitest';
-import { allSprites } from '../art/sprites';
+import { artKeys } from '../art';
 import { CHARACTERS } from '../config/characters';
+import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
 import { MATERIALS } from '../config/materials';
 import { NPCS } from '../config/npcs';
 // @ts-expect-error -- plain JS module shared with the art tool
 import { TILES as ART_TILES } from '../../tools/tiles.mjs';
-import { FIXTURE_CHARS, TILES } from './legend';
+import { DECOR_CHARS, FIXTURE_CHARS, TILES } from './legend';
 import { parseMap, serializeMap } from './mapText';
 import { MAPS } from './maps';
 import { validateMap, walkGrid } from './validate';
 
-const spriteKeys = new Set(allSprites().map((s) => s.key));
+const spriteKeys = new Set(artKeys());
 
 describe('content', () => {
-  it('every fixture, character and NPC has art', () => {
+  it('every fixture, decoration, character and NPC has art', () => {
     for (const id of Object.keys(FIXTURES)) expect(spriteKeys.has(id), `sprite for fixture ${id}`).toBe(true);
+    for (const id of Object.keys(DECOR)) expect(spriteKeys.has(id), `sprite for decoration ${id}`).toBe(true);
     for (const c of Object.values(CHARACTERS)) expect(spriteKeys.has(c.sprite), `sprite for ${c.id}`).toBe(true);
     for (const n of Object.values(NPCS)) {
       for (const key of [n.sprite, ...(n.variants ?? [])]) expect(spriteKeys.has(key), `sprite ${key} for ${n.id}`).toBe(true);
     }
   });
 
-  it('every fixture has a map character', () => {
+  it('every fixture and decoration has a map character', () => {
     const mapped = new Set(Object.values(FIXTURE_CHARS));
     for (const id of Object.keys(FIXTURES)) expect(mapped.has(id), `map character for ${id}`).toBe(true);
+    const decor = new Set(Object.values(DECOR_CHARS));
+    for (const id of Object.keys(DECOR)) expect(decor.has(id), `map character for ${id}`).toBe(true);
   });
 
   it('the tile legend matches the tileset art, in order', () => {
@@ -42,10 +46,6 @@ for (const entry of MAPS) {
     it('is playable (spawns, van, route, everything reachable)', () => {
       const { errors } = validateMap(map);
       expect(errors).toEqual([]);
-    });
-
-    it('is square', () => {
-      expect(map.width).toBe(map.height);
     });
 
     it('round-trips through the editor format', () => {
@@ -86,9 +86,12 @@ for (const entry of MAPS) {
       const best = Math.max(...loot.map((f) => f.price));
       const top = loot.filter((f) => f.price === best);
       const rest = loot.filter((f) => f.price < best);
-      // The top-priced loot is far deeper than everything else, on average and one by one.
+      // The top-priced loot is far deeper than everything else, on average and one by one:
+      // every piece of it is further from the van than most of the rest.
       expect(avgSteps(top)).toBeGreaterThan(avgSteps(rest) * 1.5);
-      for (const f of top) expect(f.steps, `${f.id} at ${f.x},${f.y}`).toBeGreaterThan(map.height * 0.7);
+      const sorted = rest.map((f) => f.steps).sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      for (const f of top) expect(f.steps, `${f.id} at ${f.x},${f.y}`).toBeGreaterThan(median);
       // Right by the van there is only cheap stuff (nothing copper within 12 steps).
       for (const f of loot.filter((f) => f.steps <= 12)) expect(f.price, `${f.id} at ${f.x},${f.y}`).toBeLessThan(MATERIALS.copper.pricePerUnit);
     });

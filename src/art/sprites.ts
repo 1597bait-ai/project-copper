@@ -174,6 +174,14 @@ const FIXTURE_ART: Record<string, string> = {
      <circle cx="32" cy="32" r="18" fill="#f2e2b0" stroke="${INK}" stroke-width="3"/>
      <circle cx="32" cy="32" r="9" fill="#fffbe6" stroke="#d8c58a" stroke-width="2"/>`,
   ),
+  electric_panel: svg(
+    64,
+    64,
+    `<rect x="10" y="2" width="44" height="54" rx="3" fill="#8f99a3" stroke="${INK}" stroke-width="3"/>
+     <rect x="16" y="9" width="32" height="40" fill="#5d666e"/>
+     <path d="M20 14 H44 M20 22 H44 M20 30 H44 M20 38 H44" stroke="${PIPE}" stroke-width="4"/>
+     <path d="M34 42 L28 50 H34 L30 58" stroke="#ffd23d" stroke-width="2.5" fill="none"/>`,
+  ),
   abandoned_copper_pile: svg(
     64,
     64,
@@ -227,6 +235,14 @@ const shadow = svg(
    <circle cx="32" cy="32" r="32" fill="url(#s)"/>`,
 );
 
+/** Placeholder decorations (the pixel art in src/art/ replaces them). */
+const DECOR_ART: Record<string, [number, number, string]> = {
+  plant: [64, 64, svg(64, 64, `<rect x="20" y="36" width="24" height="22" rx="3" fill="#b5653a" stroke="${INK}" stroke-width="3"/><circle cx="32" cy="26" r="18" fill="#3f9b4b" stroke="${INK}" stroke-width="3"/>`)],
+  trash_can: [64, 64, svg(64, 64, `<rect x="16" y="14" width="32" height="44" rx="4" fill="#5f7d8e" stroke="${INK}" stroke-width="3"/><rect x="12" y="8" width="40" height="8" rx="3" fill="#7894a3" stroke="${INK}" stroke-width="3"/>`)],
+  tree: [64, 64, svg(64, 64, `<rect x="27" y="38" width="10" height="24" fill="#7a4e2d" stroke="${INK}" stroke-width="3"/><circle cx="32" cy="26" r="24" fill="#2f7d3a" stroke="${INK}" stroke-width="3"/>`)],
+  car: [128, 128, svg(128, 128, `<rect x="14" y="10" width="100" height="108" rx="22" fill="#c0392b" stroke="${INK}" stroke-width="4"/><rect x="26" y="30" width="76" height="26" rx="6" fill="#9fd3f0" stroke="${INK}" stroke-width="3"/><rect x="26" y="80" width="76" height="20" rx="6" fill="#9fd3f0" stroke="${INK}" stroke-width="3"/>`)],
+};
+
 const looks: Record<string, WorkerLook> = {
   dalton: { shirt: '#4caf50', skin: SKIN, head: truckerCap('#263238', '#1b2327') },
   dalton_disguise: {
@@ -240,6 +256,7 @@ const looks: Record<string, WorkerLook> = {
   student: { shirt: '#26a69a', skin: '#e0ac69', back: backpack('#ef6c00'), head: hood('#00897b') },
   student_b: { shirt: '#ec407a', skin: '#f6cfa6', back: backpack('#3949ab'), head: hood('#c2185b') },
   student_c: { shirt: '#fbc02d', skin: '#8d5a3b', back: backpack('#2e7d32'), head: hood('#f57f17') },
+  sleepy_coworker: { shirt: '#8d6e63', skin: SKIN, head: beanie('#5d4037') },
 };
 
 export function allSprites(): SpriteDef[] {
@@ -253,6 +270,7 @@ export function allSprites(): SpriteDef[] {
   sprites.push({ key: 'van', width: 128, height: 256, svg: van() });
   sprites.push({ key: 'van_big', width: 256, height: 512, svg: van(2) });
   for (const [key, art] of Object.entries(FIXTURE_ART)) sprites.push({ key, width: 64, height: 64, svg: art });
+  for (const [key, [width, height, art]] of Object.entries(DECOR_ART)) sprites.push({ key, width, height, svg: art });
   sprites.push({ key: 'door_locked', width: 128, height: 64, svg: doorLocked });
   sprites.push({ key: 'door_open', width: 128, height: 64, svg: doorOpen });
   sprites.push({ key: 'sack', width: 40, height: 40, svg: sack });

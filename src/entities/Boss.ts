@@ -5,6 +5,7 @@ import { clearLine, findPath, smoothPath, type Point } from '../systems/pathfind
 import { conePolygon, inCone, type Cone } from '../systems/vision';
 import { setTextColor } from '../ui/theme';
 import type { World } from '../world/World';
+import { CharacterView } from './CharacterView';
 import type { Player } from './Player';
 
 const RADIUS = TILE * 0.3;
@@ -23,9 +24,7 @@ export type BossState = 'patrol' | 'pause' | 'alert' | 'chase' | 'search' | 'ret
 export class Boss {
   readonly zone: Phaser.GameObjects.Zone;
   readonly body: Phaser.Physics.Arcade.Body;
-  private readonly view: Phaser.GameObjects.Container;
-  private readonly sprite: Phaser.GameObjects.Image;
-  private readonly shadow: Phaser.GameObjects.Image;
+  readonly view: CharacterView;
   private readonly mark: Phaser.GameObjects.Text;
   private readonly cone: Phaser.GameObjects.Graphics;
 
@@ -64,9 +63,7 @@ export class Boss {
     this.body.setCollideWorldBounds(true);
 
     this.cone = scene.add.graphics().setDepth(7);
-    this.shadow = scene.add.image(x, y + 6, 'shadow').setDepth(9);
-    this.sprite = scene.add.image(0, 0, def.sprite);
-    this.view = scene.add.container(x, y, [this.sprite]).setDepth(11);
+    this.view = new CharacterView(scene, def.sprite, x, y);
     this.mark = scene.add
       .text(x, y, '', { fontFamily: 'Arial Black, Arial', fontSize: '56px', color: '#ffd23d', stroke: '#14161c', strokeThickness: 8 })
       .setOrigin(0.5, 1)
@@ -194,18 +191,14 @@ export class Boss {
   }
 
   syncView(time: number): void {
-    this.view.setPosition(this.x, this.y);
-    this.shadow.setPosition(this.x, this.y + 6);
-    this.sprite.rotation = this.facing;
-    const walking = this.body.speed > 5;
-    this.sprite.setScale(walking ? 1 + Math.sin(time / 90) * 0.03 : 1);
-
     const chasing = this.state === 'chase';
     const responding = this.state === 'respond';
+    this.view.update(this.x, this.y, this.facing, this.body.speed > 5, time, { running: chasing || responding });
+
     const curious = this.state === 'alert' || this.state === 'search';
     this.mark.setText(chasing || responding ? '!' : curious ? '?' : '');
     setTextColor(this.mark, chasing ? '#ff4d3d' : responding ? '#ffa53d' : '#ffd23d');
-    this.mark.setPosition(this.x, this.y - 40 + Math.sin(time / 120) * 4);
+    this.mark.setPosition(this.x, this.y + this.view.headTop - 8 + Math.sin(time / 120) * 4);
 
     // Graphics only reads x/y from the points.
     const poly = conePolygon(this.world.sight, this.visionCone) as Phaser.Math.Vector2[];
