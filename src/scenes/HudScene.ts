@@ -3,7 +3,7 @@ import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
 import { controls } from '../input/Controls';
 import { isMuted, setMuted, sfx, unlockAudio } from '../systems/sfx';
 import { updateSave } from '../systems/save';
-import { Button, COLORS, cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
+import { Button, COLORS, cssPerGamePixel, isPortrait, isTouchDevice, money, setTextColor, textStyle } from '../ui/theme';
 import type { GameScene, HudState } from './GameScene';
 
 const ABILITY_SHORT: Record<string, string> = { student_disguise: 'HIDE', look_busy: 'LOOK\nBUSY' };
@@ -203,7 +203,7 @@ export class HudScene extends Phaser.Scene {
     const full = h.bagTotal >= h.bagCapacity - 0.001;
     g.lineStyle(3 * s, full ? 0xff5a4f : 0x14161c, 1).strokeRoundedRect(bx, by, bw, bh, 8 * s);
     this.bagText.setPosition(bx + bw / 2, by + bh / 2).setText(`${h.bagTotal.toFixed(2)} / ${h.bagCapacity.toFixed(2)}`);
-    this.bagText.setColor(full ? COLORS.bad : COLORS.text);
+    setTextColor(this.bagText, full ? COLORS.bad : COLORS.text);
 
     // Shift progress with the coffee marker.
     const px = W / 2 - 130 * s;
@@ -234,7 +234,7 @@ export class HudScene extends Phaser.Scene {
     const promptX = this.touch && !isPortrait(this.scale) ? W / 2 - 80 * s : W / 2;
     if (h.prompt) {
       const verb = !this.touch && !h.promptBad && (h.action === 'UNLOCK' || h.action === 'SCRAP') ? '[E]  ' : '';
-      this.promptText.setText(verb + h.prompt).setColor(h.promptBad ? COLORS.warn : COLORS.text).setVisible(true);
+      setTextColor(this.promptText.setText(verb + h.prompt), h.promptBad ? COLORS.warn : COLORS.text).setVisible(true);
       this.promptText.setPosition(promptX, promptY);
       const tw = this.promptText.width + 48 * s;
       g.fillStyle(COLORS.panel, 0.8).fillRoundedRect(promptX - tw / 2, promptY - 30 * s, tw, 60 * s, 16 * s);
@@ -250,7 +250,7 @@ export class HudScene extends Phaser.Scene {
         const ax = m;
         const ay = H - m - 40 * s;
         const label = active ? `${h.ability.name}  ${h.ability.activeLeft.toFixed(1)}s` : ready ? `[Q]  ${h.ability.name}` : `${h.ability.name}  ${Math.ceil(h.ability.cooldownLeft)}s`;
-        this.abilityText.setText(label).setPosition(ax + 20 * s, ay).setColor(active ? '#c9a7ff' : ready ? COLORS.text : COLORS.muted);
+        setTextColor(this.abilityText.setText(label).setPosition(ax + 20 * s, ay), active ? '#c9a7ff' : ready ? COLORS.text : COLORS.muted);
         const tw = this.abilityText.width + 40 * s;
         g.fillStyle(COLORS.panel, 0.8).fillRoundedRect(ax, ay - 30 * s, tw, 60 * s, 16 * s);
         if (!ready && !active) {

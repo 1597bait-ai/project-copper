@@ -3,6 +3,7 @@ import { BALANCE, TILE } from '../config/balance';
 import type { NpcDef } from '../config/npcs';
 import { clearLine, findPath, smoothPath, type Point } from '../systems/pathfinding';
 import { conePolygon, inCone, type Cone } from '../systems/vision';
+import { setTextColor } from '../ui/theme';
 import type { World } from '../world/World';
 import type { Player } from './Player';
 
@@ -201,7 +202,7 @@ export class Boss {
     const responding = this.state === 'respond';
     const curious = this.state === 'alert' || this.state === 'search';
     this.mark.setText(chasing || responding ? '!' : curious ? '?' : '');
-    this.mark.setColor(chasing ? '#ff4d3d' : responding ? '#ffa53d' : '#ffd23d');
+    setTextColor(this.mark, chasing ? '#ff4d3d' : responding ? '#ffa53d' : '#ffd23d');
     this.mark.setPosition(this.x, this.y - 40 + Math.sin(time / 120) * 4);
 
     // Graphics only reads x/y from the points.

@@ -13,7 +13,7 @@ import { mergeContents, roundMoney, saleValue, type ScrapContents } from '../sys
 import { clockText } from '../systems/clock';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
 import { sfx } from '../systems/sfx';
-import { cssPerGamePixel, money, textStyle } from '../ui/theme';
+import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { parseMap } from '../world/mapText';
 import { DEFAULT_MAP } from '../world/maps';
 import { validateMap } from '../world/validate';
@@ -116,13 +116,22 @@ export class GameScene extends Phaser.Scene {
   create(): void {
     const character: CharacterDef = CHARACTERS[this.characterId];
     let map = parseMap(this.mapText ?? DEFAULT_MAP.text);
-    const report = validateMap(map);
-    if (report.errors.length) {
-      // Never strand the player on a broken map: fall back to the built-in school.
-      console.warn('Map has problems, playing the default map instead:', report.errors);
+    let report = validateMap(map);
+    if (report.errors.length && this.mapText !== undefined) {
+      // Never strand the player on a broken custom map: fall back to the built-in school.
+      const problem = report.errors[0];
+      console.warn('Map has problems, playing the built-in map instead:', report.errors);
       this.mapText = undefined;
       map = parseMap(DEFAULT_MAP.text);
-      this.time.delayedCall(800, () => this.toast(`That map can't be played yet: ${report.errors[0]}`, '#ffc23d', 5000));
+      report = validateMap(map);
+      this.time.delayedCall(800, () => this.toast(`That map can't be played yet: ${problem}`, '#ffc23d', 5000));
+    }
+    if (report.errors.length) {
+      // The built-in map itself is broken (only while someone is hand-editing it): say so instead of crashing.
+      console.error('The built-in map has problems:', report.errors);
+      this.over = true;
+      this.scene.start('Menu', { notice: `The map can't be played: ${report.errors[0]}` });
+      return;
     }
     this.world = new World(this, map);
     this.physics.world.setBounds(0, 0, this.world.width, this.world.height);
@@ -140,7 +149,6 @@ export class GameScene extends Phaser.Scene {
     this.channelBar = this.add.graphics().setDepth(25);
 
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, this.world.width, this.world.height);
     cam.startFollow(this.player.zone, true, 0.12, 0.12);
     cam.setBackgroundColor('#14161c');
     cam.fadeIn(400, 20, 22, 28);
@@ -178,7 +186,9 @@ export class GameScene extends Phaser.Scene {
 
   update(_time: number, deltaMs: number): void {
     if (this.over) return;
-    const dt = Math.min(deltaMs / 1000, 0.05);
+    // Same clock as Arcade physics (Phaser already caps and smooths the frame delta), so on a slow
+    // device timers and movement stay in step instead of NPCs out-running the shift clock.
+    const dt = deltaMs / 1000;
 
     const input = this.readInput();
     if (input.pause) {
@@ -358,9 +368,33 @@ export class GameScene extends Phaser.Scene {
     else this.toast(`${NPCS.mr_gravy.name} is sprinting over!`, '#ff8a5a');
   }
 
-  /** Zoom in on small physical screens (phones, portrait) so a tile stays about 34 CSS pixels wide. */
+  /**
+   * Zoom in on small physical screens (phones, portrait) so a tile stays about 34 CSS pixels wide.
+   * The camera may scroll a little past the map's top and bottom so the HUD bands never hide the
+   * van or an edge room, and a map smaller than the screen sits in the middle.
+   */
   private fitCamera() {
-    this.cameras.main.setZoom(Phaser.Math.Clamp(34 / (TILE * cssPerGamePixel(this.scale)), 1, 3));
+    const cam = this.cameras.main;
+    cam.setZoom(Phaser.Math.Clamp(34 / (TILE * cssPerGamePixel(this.scale)), 1, 3));
+    if (!this.world) return;
+    const vw = cam.width / cam.zoom;
+    const vh = cam.height / cam.zoom;
+    const portrait = isPortrait(this.scale);
+    const padTop = vh * (portrait ? 0.2 : 0.15);
+    const padBottom = vh * (portrait ? 0.24 : isTouchDevice() ? 0.18 : 0.06);
+    let top = -padTop;
+    let height = this.world.height + padTop + padBottom;
+    if (height < vh) {
+      top -= (vh - height) / 2;
+      height = vh;
+    }
+    let left = 0;
+    let width = this.world.width;
+    if (width < vw) {
+      left = (width - vw) / 2;
+      width = vw;
+    }
+    cam.setBounds(left, top, width, height);
   }
 
   /** Keys released while paused would otherwise stay "held". */

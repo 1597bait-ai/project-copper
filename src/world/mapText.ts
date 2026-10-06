@@ -60,11 +60,13 @@ export function parseMap(text: string): ParsedMap {
   const names: ParsedMap['names'] = [];
   const raw: string[] = [];
   text
+    // Windows editors may save a byte-order mark and CRLF line endings.
+    .replace(/^\uFEFF/, '')
     .replace(/\r/g, '')
     .split('\n')
     .forEach((line, i) => {
       const trimmed = line.trimEnd();
-      if (!trimmed || trimmed.startsWith('//')) return;
+      if (!trimmed || trimmed.trimStart().startsWith('//')) return;
       if (trimmed.startsWith('@')) {
         const m = NAME_LINE.exec(trimmed);
         if (m) names.push({ x: Number(m[1]), y: Number(m[2]), name: m[3].trim() });

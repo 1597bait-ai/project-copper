@@ -27,12 +27,13 @@ you were seen and searches. Get out of there (or get the scrap to the van) befor
 Dalton's disguise fools students too.
 
 **Map (Lincoln Middle School):** a square building, value rising the deeper you go from the van:
-- *Front* (by the entrance): front office, lobby, nurse — desks and lamps, low value.
+- *Front* (by the entrance): front office, lobby, nurse — desks only, low value.
 - *Middle*: four classrooms in the centre (desks, lamps), restrooms and janitor's closet (brass),
   teachers' lounge; the hallway ring around them has fountains and heaters (copper) and is
   Mr. Gravy's patrol.
-- *Back* (deepest): Mr. Gravy's office, the storage room (abandoned copper pile), and the
-  **locked boiler and mechanical rooms**: one way in and out, the most copper in the school.
+- *Back* (deepest): Mr. Gravy's office, the storage room, and the **locked boiler and
+  mechanical rooms** (one way in and out). The abandoned copper piles back here are
+  **bare bright copper**, worth twice normal copper, so a trip to the back pays the most.
 
 **Crew:** Dalton (fast, *Act Like a Student*: hides carried scrap for 5s), Tomothy (slow,
 best at repair, *Act Like You're Working*: scrapping looks legit for 6s), Dunkin (carries the most).
@@ -91,9 +92,11 @@ stack into a column and the HUD rearranges.
 Maps are plain text: **one character = one tile** (64 px). The file
 `src/assets/maps/lincoln.txt` starts with the legend, for example `#` wall, `.` hallway,
 `,` classroom carpet, `f` drinking fountain, `c` abandoned copper pile, `P` player start,
-`G` Mr. Gravy, `S` student, `VVVV` the van, `L` a locked door, `1`–`9` Mr. Gravy's route in
-order. Things stand on the floor next to them, so you never pick a floor for them. A line like
-`@ 9,40 Front Office` names the room containing tile x=9, y=40.
+`G` Mr. Gravy, `S` student, `L` a locked door, `1`–`9` Mr. Gravy's route in order, and `V` the
+van (a 4x2 or 2x4 block, e.g. two rows of `VVVV`). Things stand on the floor next to them, so
+you never pick a floor for them; put them on a floor tile beside a wall, not in the wall. Mr. Gravy
+walks the shortest way between route stops, so place stops along hallways if you want him to
+stay in them. A line like `@ 9,40 Front Office` names the room containing tile x=9, y=40.
 
 Two ways to change it:
 - **In the game:** Menu → **MAP EDITOR**. Paint floors and walls (click-drag or finger-drag),
@@ -101,7 +104,9 @@ Two ways to change it:
   make the map unplayable (no van, loot walled off...). **PLAY** tests it straight away;
   **COPY MAP** copies the text so you can paste it into `lincoln.txt` (or send it over). Your
   work autosaves in the browser.
-- **In a text editor:** change the characters, then `npm run map:check`.
+- **In a text editor:** change the characters, then `npm run map:check`. Windows line endings
+  and "UTF-8 with BOM" are fine. `npm run map:format` refreshes the legend at the top (it keeps
+  your own `//` notes and won't touch a map that has typos).
 
 `npm test` refuses any shipped map that can't be played.
 
@@ -110,7 +115,9 @@ Two ways to change it:
 - **New fixture:** add an entry to `src/config/fixtures.ts`, give it a map character in
   `FIXTURE_CHARS` (`src/world/legend.ts`) and art in `FIXTURE_ART` (`src/art/sprites.ts`).
   It shows up in the editor's palette automatically.
-- **New map:** add a `.txt` file to `src/assets/maps/` and list it in `src/world/maps.ts`.
+- **New map:** add a `.txt` file to `src/assets/maps/` and list it in `src/world/maps.ts`. For
+  now the game plays (and the editor opens) the first map in that list, so put a new map first
+  to play it; every listed map is checked by `npm test`.
 - **New character:** add to `CHARACTERS` + `CHARACTER_ORDER` and give them a look in `sprites.ts`.
   They show up on the crew select screen automatically.
 - **Real art / sounds:** replace a sprite by loading a PNG with the same texture key in
@@ -128,8 +135,8 @@ Two ways to change it:
 These weren't on the design board, so they're placeholders in `src/config/`:
 
 - Specialties: Dalton = HVAC, Tomothy = plumbing, Dunkin = none.
-- Materials: wall heater = copper, toilet and mop sink = brass. Prices are copper $10, brass $6,
-  aluminum $4, steel $2 per unit.
+- Materials: wall heater = copper, toilet and mop sink = brass, abandoned copper pile = bare bright
+  copper. Prices are bare bright $20, copper $10, brass $6, aluminum $4, steel $2 per unit.
 - Desk and lamp use the two "(name)" sticky notes (scrap 1, 0.8–1.2, recharge 45–60s).
 - Scrap times (`workSeconds`), the bag (capacity = 1 + Carry, so Dalton's is 2), vision cone
   size, and the "boss gets faster" point (noon).

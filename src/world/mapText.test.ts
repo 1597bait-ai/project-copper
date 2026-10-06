@@ -76,6 +76,34 @@ describe('map text format', () => {
     expect(report.errors.some((e) => e.includes('stop 2'))).toBe(false);
   });
 
+  it('reads files saved with a byte-order mark, CRLF endings and indented notes', () => {
+    const windows = '\uFEFF' + SMALL.replace('// a tiny test school', '   // an indented note').replace(/\n/g, '\r\n');
+    const again = parseMap(windows);
+    expect(again.rows).toEqual(map.rows);
+    expect(again.problems).toEqual([]);
+  });
+
+  it('says when the player start is walled in, instead of listing everything', () => {
+    const boxed = parseMap(SMALL.replace('B.P..VV..B', 'B#P#.VV..B').replace('B........B', 'B###.....B').replace('B....VV..B', 'B###.VV..B'));
+    const { errors } = validateMap(boxed);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('player start at 2,8 is walled in');
+  });
+
+  it('notices Mr. Gravy locked in by a door', () => {
+    // His start and stop 1 are in a little room whose only way out is a locked door.
+    const lockedIn = parseMap(SMALL.replace('B.1....2.B', 'B.1#...2.B').replace('B..G..S..B', 'B.G#..S..B').replace('B........B', 'B#L#.....B'));
+    expect(validateMap(lockedIn).errors.filter((e) => !e.startsWith('Mr. Gravy is locked in'))).toEqual([]);
+    const { errors } = validateMap(lockedIn);
+    expect(errors.some((e) => e.startsWith('Mr. Gravy is locked in'))).toBe(true);
+  });
+
+  it('warns about a fixture typed into a wall line', () => {
+    const gap = parseMap(SMALL.replace('B###.##LLB', 'B#d#.##LLB'));
+    const { warnings } = validateMap(gap);
+    expect(warnings.some((w) => w.startsWith('Desk at 2,4 sits in a gap between walls'))).toBe(true);
+  });
+
   it('finds unreachable loot', () => {
     const walled = parseMap(SMALL.replace('B,,,,.f..B', 'B,,,,#f..B').replace('B,,d,....B', 'B,,d,#...B').replace('B,,,,....B', 'B,,,,#...B').replace('B###.##LLB', 'B######LLB'));
     const report = validateMap(walled);

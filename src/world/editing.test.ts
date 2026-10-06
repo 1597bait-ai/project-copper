@@ -53,6 +53,19 @@ describe('floorUnder', () => {
 });
 
 describe('paint', () => {
+  it("won't put things into a wall (that would leave a see-through gap), except locked doors", () => {
+    const fixture = paint(SMALL, 1, 4, 'c');
+    expect(fixture.changed).toBe(false);
+    expect(fixture.message).toContain('not in the wall');
+    expect(paint(SMALL, 1, 4, 'S').changed).toBe(false);
+    expect(paint(SMALL, 1, 4, ROUTE_STOP).changed).toBe(false);
+    expect(paint(SMALL, 1, 4, 'L').rows[4][1]).toBe('L');
+    expect(paint(SMALL, 1, 4, ERASER).rows[4][1]).toBe('.');
+    const van = paint(SMALL, 2, 4, VAN);
+    expect(van.changed).toBe(false);
+    expect(van.message).toContain('open ground');
+  });
+
   it('replaces floors and walls and never touches the input', () => {
     const before = [...SMALL];
     const r = paint(SMALL, 4, 3, '#');
@@ -127,10 +140,16 @@ describe('paint', () => {
     expect(map.boss).toBeNull(); // the van landed on Mr. Gravy
   });
 
-  it('stamps a 2x4 van when turned, pushed inside the map edge', () => {
-    const r = paint(SMALL, 8, 9, VAN, { vanRotated: true });
-    expect(parseMap(r.rows.join('\n')).van).toEqual({ x: 8, y: 7, w: 2, h: 4 });
+  it('stamps a 2x4 van when turned', () => {
+    const r = paint(SMALL, 7, 7, VAN, { vanRotated: true });
+    expect(parseMap(r.rows.join('\n')).van).toEqual({ x: 7, y: 6, w: 2, h: 4 });
     expect(count(r.rows, 'V')).toBe(8);
+  });
+
+  it("won't stamp the van over the outer wall at the map edge", () => {
+    const r = paint(SMALL, 8, 9, VAN, { vanRotated: true });
+    expect(r.changed).toBe(false);
+    expect(r.rows).toEqual(SMALL);
   });
 
   it('removes the whole van when any of its tiles is painted or erased', () => {

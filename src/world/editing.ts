@@ -114,6 +114,7 @@ export function vanRect(rows: readonly string[], x: number, y: number, rotated =
  * - ERASER removes a thing (leaving the floor that was under it) or turns a floor/wall into hallway.
  *   A removed van leaves the floor most common around it.
  * - Touching any cell of the van with another tool removes the whole van, so it never ends up broken.
+ * - Things (except locked doors) can't go into a wall: that would leave a gap people walk and see through.
  * - Outside the map nothing happens.
  */
 export function paint(rows: readonly string[], x: number, y: number, ch: string, opts: PaintOptions = {}): PaintResult {
@@ -137,9 +138,15 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
     grid[y][x] = value;
   };
 
+  const intoWall = isWallChar(current) && ch !== 'L' && ch !== ERASER && (ch === VAN || ch === ROUTE_STOP || isObject(ch));
+  if (intoWall && ch !== VAN) return { ...unchanged, message: 'Put that on the floor next to the wall, not in the wall' };
+
   if (ch === VAN) {
     const r = vanRect(rows, x, y, opts.vanRotated);
     if (!r) return { ...unchanged, message: 'The map is too small for the van' };
+    for (let cy = r.y; cy < r.y + r.h; cy++) {
+      for (let cx = r.x; cx < r.x + r.w; cx++) if (isWallChar(rows[cy][cx])) return { ...unchanged, message: 'The van needs open ground, with no walls under it' };
+    }
     removeAll(VAN);
     for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) grid[cy][cx] = VAN;
   } else if (ch === ROUTE_STOP) {

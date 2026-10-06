@@ -29,6 +29,12 @@ export function textStyle(
   };
 }
 
+/** Text.setColor re-renders and re-uploads the text every call, so only call it on a change. */
+export function setTextColor(text: Phaser.GameObjects.Text, color: string): Phaser.GameObjects.Text {
+  if (text.style.color !== color) text.setColor(color);
+  return text;
+}
+
 export function money(n: number): string {
   return `$${n.toFixed(2)}`;
 }

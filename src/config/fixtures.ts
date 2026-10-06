@@ -35,7 +35,7 @@ export const FIXTURES: Record<string, FixtureDef> = {
     name: 'Abandoned Copper Pile',
     tier: 'very high',
     type: 'free',
-    material: 'copper',
+    material: 'bare_bright', // top-grade copper: the reason to go deep
     scrap: 1.5,
     recharge: [60, 120],
     workSeconds: 1.5,

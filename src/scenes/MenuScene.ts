@@ -19,8 +19,15 @@ export class MenuScene extends Phaser.Scene {
   private starting = false;
   private cards: Card[] = [];
 
+  /** A problem to show on the menu (e.g. the map file can't be played). */
+  private notice: string | null = null;
+
   constructor() {
     super('Menu');
+  }
+
+  init(data?: { notice?: string }): void {
+    this.notice = data?.notice ?? null;
   }
 
   create(): void {
@@ -37,6 +44,12 @@ export class MenuScene extends Phaser.Scene {
     const top = portrait ? Math.max(0, (H - columnH) / 2) : 0;
 
     this.drawBackground(W, H);
+    if (this.notice) {
+      this.add
+        .text(W / 2, top + 18, this.notice, textStyle(26, COLORS.bad, { align: 'center', wordWrap: { width: Math.min(W - 80, 1600) } }))
+        .setOrigin(0.5, 0)
+        .setDepth(10);
+    }
 
     // Title
     this.add.text(cx, top + 70, 'PROJECT', textStyle(46, COLORS.muted)).setOrigin(0.5, 0);
