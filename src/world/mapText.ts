@@ -42,6 +42,8 @@ export interface ParsedMap {
   fixtures: { id: string; x: number; y: number }[];
   /** Mr. Gravy's route, in stop order. */
   patrol: TilePoint[];
+  /** The digit written on each route stop (parallel to `patrol`; gaps like 1,2,5 are allowed). */
+  patrolStops: number[];
   rooms: ParsedRoom[];
   /** Room index per cell (-1 for walls and doors). */
   roomAt: Int16Array;
@@ -168,7 +170,9 @@ export function parseMap(text: string): ParsedMap {
       }
     }
   }
-  const patrol = [...stops.entries()].sort((a, b) => a[0] - b[0]).map(([, p]) => p);
+  const ordered = [...stops.entries()].sort((a, b) => a[0] - b[0]);
+  const patrol = ordered.map(([, p]) => p);
+  const patrolStops = ordered.map(([n]) => n);
 
   // Van and doors: group touching cells into rectangles.
   const groups = (ch: string): TileRect[] => {
@@ -263,7 +267,7 @@ export function parseMap(text: string): ParsedMap {
     else problems.push(`"@ ${n.x},${n.y} ${n.name}" doesn't point at a room`);
   }
 
-  return { width, height, rows, floor, walls, player, boss, students, van, doors, fixtures, patrol, rooms, roomAt, names, problems };
+  return { width, height, rows, floor, walls, player, boss, students, van, doors, fixtures, patrol, patrolStops, rooms, roomAt, names, problems };
 }
 
 /** The comment block written at the top of every saved map, generated from the legend. */

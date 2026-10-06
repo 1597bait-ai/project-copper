@@ -18,12 +18,21 @@ from the browser ("Add to Home Screen").
 
 **The loop:** walk up to a fixture → scrap it (stand still while the bar fills) → carry it to the
 van to sell → avoid Mr. Gravy's yellow vision cone while you're carrying or scrapping. Empty
-hands are safe. The shift runs 7:00 AM → 3:00 PM (4 real minutes); at noon Mr. Gravy finishes
+hands are safe. The shift runs 7:00 AM → 3:00 PM (5 real minutes); at noon Mr. Gravy finishes
 his coffee and speeds up. Scrap still in your bag at 3:00 is lost.
 
-**Map:** classrooms (desks and lamps, low value, quiet), hallway (fountains and heaters,
-higher value, Mr. Gravy's patrol), restrooms and the janitor's closet (brass), and the locked
-**boiler room**: one way in and out, but it has the abandoned copper pile.
+**Students** wander the halls and classrooms with small blue vision cones. If one sees you
+carrying scrap or scrapping, they shout and run to tell Mr. Gravy, who then **sprints** to where
+you were seen and searches. Get out of there (or get the scrap to the van) before he arrives.
+Dalton's disguise fools students too.
+
+**Map (Lincoln Middle School):** a square building, value rising the deeper you go from the van:
+- *Front* (by the entrance): front office, lobby, nurse — desks and lamps, low value.
+- *Middle*: four classrooms in the centre (desks, lamps), restrooms and janitor's closet (brass),
+  teachers' lounge; the hallway ring around them has fountains and heaters (copper) and is
+  Mr. Gravy's patrol.
+- *Back* (deepest): Mr. Gravy's office, the storage room (abandoned copper pile), and the
+  **locked boiler and mechanical rooms**: one way in and out, the most copper in the school.
 
 **Crew:** Dalton (fast, *Act Like a Student*: hides carried scrap for 5s), Tomothy (slow,
 best at repair, *Act Like You're Working*: scrapping looks legit for 6s), Dunkin (carries the most).
@@ -42,9 +51,10 @@ npm run dev        # http://localhost:5173 (also on your Wi-Fi, so you can open 
 | `npm run dev` | Dev server with live reload |
 | `npm run build` | Production build in `dist/` (upload anywhere: GitHub Pages, itch.io, Netlify) |
 | `npm run build:single` | Whole game in one `dist-single/index.html` (works offline, easy to share) |
-| `npm test` | Unit tests + "level lint" (every map is checked for unknown fixtures, unreachable spots, a walkable patrol) |
-| `npm run e2e` | Plays through the rules in a headless browser on desktop + phone and saves screenshots to `.smoke/` (run `npm run build` first) |
-| `npm run map` | Rebuilds Tiled maps from the text layouts in `tools/maps/` |
+| `npm test` | Unit tests + "level lint" (every map is checked for unknown things, unreachable loot, a walkable patrol) |
+| `npm run e2e` | Plays through the rules, students and map editor in a headless browser on desktop and phones, saving screenshots to `.smoke/` (run `npm run build` first) |
+| `npm run map:check` | Checks every map in `src/assets/maps/` and lists its problems |
+| `npm run map:format` | Rewrites map files with the current legend at the top |
 | `npm run art` | Re-renders the tileset PNG and app icons |
 
 ## How it's built
@@ -61,12 +71,14 @@ src/config/        ← the design board lives here: edit numbers, add content
   upgrades.ts        boots, tools, bags, keys (for the shop, not wired up yet)
   balance.ts         every tuning knob: shift length, stat → speed, vision cone size, catch timing...
 src/systems/       pure game rules, no Phaser (bag, scrapping math, A* pathfinding, vision, clock, save)
-src/entities/      Player, Boss (Mr. Gravy's AI), Fixture, Door
-src/world/         map loading (World.ts), map list (maps.ts), level lint test
-src/scenes/        Boot → Menu → Game + Hud → ShiftEnd
+src/entities/      Player, Boss (Mr. Gravy's AI), Student, Fixture, Door
+src/world/         map format (legend.ts, mapText.ts), checker (validate.ts), editor rules
+                   (editing.ts), level building (World.ts), map list (maps.ts)
+src/assets/maps/   the maps themselves, as plain text
+src/scenes/        Boot → Menu → Game + Hud → ShiftEnd, and the map Editor
 src/input/         keyboard, touch and gamepad all feed one Controls object
 src/art/sprites.ts placeholder vector art (SVG), rasterized at startup
-tools/             map generator, tileset renderer, e2e test
+tools/             map checker, tileset renderer, e2e test
 ```
 
 **Screens:** the game is laid out at 1920×1080 and *expands* to fill any screen (no black
@@ -74,15 +86,31 @@ bars). The camera zoom and HUD size follow the screen's real pixel density, so p
 zoomed-in view, a bigger HUD, a floating joystick and big buttons. Held upright, the menus
 stack into a column and the HUD rearranges.
 
+### Edit the map
+
+Maps are plain text: **one character = one tile** (64 px). The file
+`src/assets/maps/lincoln.txt` starts with the legend, for example `#` wall, `.` hallway,
+`,` classroom carpet, `f` drinking fountain, `c` abandoned copper pile, `P` player start,
+`G` Mr. Gravy, `S` student, `VVVV` the van, `L` a locked door, `1`–`9` Mr. Gravy's route in
+order. Things stand on the floor next to them, so you never pick a floor for them. A line like
+`@ 9,40 Front Office` names the room containing tile x=9, y=40.
+
+Two ways to change it:
+- **In the game:** Menu → **MAP EDITOR**. Paint floors and walls (click-drag or finger-drag),
+  place things, move the route, undo/redo, zoom and pan. The problems panel tells you what would
+  make the map unplayable (no van, loot walled off...). **PLAY** tests it straight away;
+  **COPY MAP** copies the text so you can paste it into `lincoln.txt` (or send it over). Your
+  work autosaves in the browser.
+- **In a text editor:** change the characters, then `npm run map:check`.
+
+`npm test` refuses any shipped map that can't be played.
+
 ### Add things
 
-- **New fixture:** add an entry to `src/config/fixtures.ts`, add its art to `FIXTURE_ART` in
-  `src/art/sprites.ts`, then place it on a map (Tiled: object layer `objects`, type `fixture`,
-  name = the id). `npm test` fails if a map uses an id that doesn't exist.
-- **New map:** either draw it in [Tiled](https://www.mapeditor.org) (copy
-  `src/assets/maps/school-01.json` as a template), or write a text layout in `tools/maps/` (see
-  the legend in `tools/generate-map.mjs`) and run `npm run map`. Then add it to
-  `src/world/maps.ts`. Once you start editing a map in Tiled, stop regenerating it from text.
+- **New fixture:** add an entry to `src/config/fixtures.ts`, give it a map character in
+  `FIXTURE_CHARS` (`src/world/legend.ts`) and art in `FIXTURE_ART` (`src/art/sprites.ts`).
+  It shows up in the editor's palette automatically.
+- **New map:** add a `.txt` file to `src/assets/maps/` and list it in `src/world/maps.ts`.
 - **New character:** add to `CHARACTERS` + `CHARACTER_ORDER` and give them a look in `sprites.ts`.
   They show up on the crew select screen automatically.
 - **Real art / sounds:** replace a sprite by loading a PNG with the same texture key in
@@ -107,11 +135,13 @@ These weren't on the design board, so they're placeholders in `src/config/`:
   size, and the "boss gets faster" point (noon).
 - Getting caught = one warning, and Mr. Gravy confiscates whatever is in your bag.
 - Abilities last 5–6s with a 20s cooldown.
+- Students: they notice you in about 1–2 seconds, run a little slower than Dalton, and Mr. Gravy
+  sprints at 1.35× his chase speed when told. After telling, a student leaves you alone for 8s.
 
 ## Roadmap
 
 1. ~~First playable: one school, the scrap → van → sell loop, Mr. Gravy, warnings, shift timer~~
-2. Students who alert Mr. Gravy, the sleepy coworker (find him to recover a warning)
+2. ~~Students who alert Mr. Gravy, square school, map editor~~ — next: the sleepy coworker (find him to recover a warning)
 3. Shop between shifts (boots, tools, bags, keys) and persistent progress
 4. Real art, sound and music, more schools
 5. App store builds

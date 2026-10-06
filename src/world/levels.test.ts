@@ -19,7 +19,9 @@ describe('content', () => {
   it('every fixture, character and NPC has art', () => {
     for (const id of Object.keys(FIXTURES)) expect(spriteKeys.has(id), `sprite for fixture ${id}`).toBe(true);
     for (const c of Object.values(CHARACTERS)) expect(spriteKeys.has(c.sprite), `sprite for ${c.id}`).toBe(true);
-    for (const n of Object.values(NPCS)) expect(spriteKeys.has(n.sprite), `sprite for ${n.id}`).toBe(true);
+    for (const n of Object.values(NPCS)) {
+      for (const key of [n.sprite, ...(n.variants ?? [])]) expect(spriteKeys.has(key), `sprite ${key} for ${n.id}`).toBe(true);
+    }
   });
 
   it('every fixture has a map character', () => {

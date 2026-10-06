@@ -154,8 +154,11 @@ export class HudScene extends Phaser.Scene {
     }
   }
 
+  /** Toasts stack by their real height, so wrapped (two-line) messages never overlap. */
   private toastY(i: number) {
-    return this.toastTop + i * 62 * this.ui;
+    let y = this.toastTop;
+    for (let j = 0; j < i && j < this.toasts.length; j++) y += this.toasts[j].height + 12 * this.ui;
+    return y;
   }
 
   // ---- per-frame ---------------------------------------------------------
@@ -354,7 +357,7 @@ export class HudScene extends Phaser.Scene {
       .setOrigin(0.5, 0)
       .setAlpha(0);
     this.toasts.push(t);
-    this.tweens.add({ targets: t, alpha: 1, y: '-=10', duration: 200 });
+    this.tweens.add({ targets: t, alpha: 1, duration: 200 });
     this.time.delayedCall(duration, () => {
       this.tweens.add({
         targets: t,

@@ -7,6 +7,7 @@ import { Boss } from '../entities/Boss';
 import type { Door } from '../entities/Door';
 import type { Fixture } from '../entities/Fixture';
 import { Player } from '../entities/Player';
+import { Student, type StudentEvent } from '../entities/Student';
 import { controls } from '../input/Controls';
 import { mergeContents, roundMoney, saleValue, type ScrapContents } from '../systems/Bag';
 import { clockText } from '../systems/clock';
@@ -62,6 +63,7 @@ export class GameScene extends Phaser.Scene {
   world!: World;
   player!: Player;
   boss!: Boss;
+  students: Student[] = [];
   hud!: HudState;
 
   private characterId = 'dalton';
@@ -78,6 +80,8 @@ export class GameScene extends Phaser.Scene {
   private over = false;
   private ending = false;
   private wasChasing = false;
+  /** Shift time each kind of student toast last showed, so a crowd of tattlers doesn't spam. */
+  private studentToastAt: Partial<Record<StudentEvent, number>> = {};
   private channelBar!: Phaser.GameObjects.Graphics;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private padPrev = { a: false, x: false, b: false, start: false };
@@ -104,6 +108,8 @@ export class GameScene extends Phaser.Scene {
     this.over = false;
     this.ending = false;
     this.wasChasing = false;
+    this.students = [];
+    this.studentToastAt = {};
     controls.reset();
   }
 
@@ -123,8 +129,10 @@ export class GameScene extends Phaser.Scene {
 
     this.player = new Player(this, this.world.playerSpawn.x, this.world.playerSpawn.y, character);
     this.boss = new Boss(this, this.world, NPCS.mr_gravy);
+    this.students = this.world.studentSpawns.map((spawn, i) => new Student(this, this.world, NPCS.student, spawn, i));
 
-    for (const body of [this.player.zone, this.boss.zone]) {
+    // Students walk through the player, Mr. Gravy and each other; only walls and solid things stop them.
+    for (const body of [this.player.zone, this.boss.zone, ...this.students.map((s) => s.zone)]) {
       this.physics.add.collider(body, this.world.walls);
       this.physics.add.collider(body, this.world.solids);
     }
@@ -214,6 +222,9 @@ export class GameScene extends Phaser.Scene {
     if (chasing && !this.wasChasing) sfx.spotted();
     this.wasChasing = chasing;
 
+    // Once fired, nobody walks off during the "you're fired" beat.
+    if (!this.over) this.updateStudents(dt);
+
     for (const f of this.world.fixtures) f.update(dt);
     this.refreshHud();
   }
@@ -281,6 +292,7 @@ export class GameScene extends Phaser.Scene {
     const taken = p.bag.takeAll();
     mergeContents(this.lost, taken);
     this.boss.afterCatch();
+    for (const s of this.students) s.cancelReport();
     sfx.warning();
     this.cameras.main.shake(250, 0.008);
     this.cameras.main.flash(200, 255, 60, 40);
@@ -289,8 +301,7 @@ export class GameScene extends Phaser.Scene {
     if (this.warnings >= BALANCE.warningsUntilFired) {
       this.toast("THREE WARNINGS — YOU'RE FIRED!", '#ff5a4f', 2500);
       this.over = true;
-      this.player.body.setVelocity(0, 0);
-      this.boss.body.setVelocity(0, 0);
+      this.freezeActors();
       this.time.delayedCall(1600, () => this.endShift(true));
     } else {
       const lostValue = saleValue(taken);
@@ -305,8 +316,7 @@ export class GameScene extends Phaser.Scene {
     if (this.ending) return;
     this.ending = true;
     this.over = true;
-    this.player.body.setVelocity(0, 0);
-    this.boss.body.setVelocity(0, 0);
+    this.freezeActors();
     if (!fired && !this.player.bag.isEmpty) mergeContents(this.lost, this.player.bag.takeAll());
     fired ? sfx.fired() : sfx.shiftOver();
     const summary: ShiftSummary = {
@@ -323,6 +333,29 @@ export class GameScene extends Phaser.Scene {
       this.scene.stop('Hud');
       this.scene.start('ShiftEnd', summary);
     });
+  }
+
+  /** Stops everyone in place; nothing updates them once the shift is over. */
+  private freezeActors() {
+    for (const a of [this.player, this.boss, ...this.students]) a.body.setVelocity(0, 0);
+  }
+
+  private updateStudents(dt: number) {
+    for (const s of this.students) {
+      const event = s.update(dt, this.player, this.boss);
+      if (event) this.onStudent(event);
+    }
+  }
+
+  private onStudent(event: StudentEvent) {
+    const last = this.studentToastAt[event];
+    if (event === 'saw') sfx.tattle();
+    else sfx.report();
+    if (last !== undefined && this.elapsed - last < BALANCE.students.toastCooldownSeconds) return;
+    this.studentToastAt[event] = this.elapsed;
+    // Short enough for one line on a portrait phone: the HUD stacks toasts one line apart.
+    if (event === 'saw') this.toast('A student is telling on you!', '#ffc23d');
+    else this.toast(`${NPCS.mr_gravy.name} is sprinting over!`, '#ff8a5a');
   }
 
   /** Zoom in on small physical screens (phones, portrait) so a tile stays about 34 CSS pixels wide. */
@@ -437,6 +470,8 @@ export class GameScene extends Phaser.Scene {
     const time = this.time.now;
     this.player.syncView(time);
     this.boss.syncView(time);
+    const view = this.cameras.main.worldView;
+    for (const s of this.students) s.syncView(time, view);
 
     const g = this.channelBar;
     g.clear();
@@ -491,7 +526,9 @@ export class GameScene extends Phaser.Scene {
     h.progress = Math.min(1, this.elapsed / BALANCE.shift.lengthSeconds);
     h.clock = clockText(h.progress);
     h.location = this.world.roomAt(p.x, p.y);
-    h.danger = this.boss.state === 'chase' ? Math.max(0.6, this.boss.suspicion) : this.boss.suspicion;
+    const bossDanger = this.boss.state === 'chase' ? Math.max(0.6, this.boss.suspicion) : this.boss.suspicion;
+    const studentDanger = Math.max(0, ...this.students.map((s) => s.suspicion)) * BALANCE.students.dangerWeight;
+    h.danger = Math.max(bossDanger, studentDanger);
     h.ability = p.ability
       ? {
           name: p.ability.name,

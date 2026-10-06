@@ -238,6 +238,8 @@ const looks: Record<string, WorkerLook> = {
   tomothy: { shirt: '#42a5f5', skin: '#efc19a', head: greyHorseshoe },
   dunkin: { shirt: '#ef5350', skin: '#d9a273', head: beanie('#37474f') },
   student: { shirt: '#26a69a', skin: '#e0ac69', back: backpack('#ef6c00'), head: hood('#00897b') },
+  student_b: { shirt: '#ec407a', skin: '#f6cfa6', back: backpack('#3949ab'), head: hood('#c2185b') },
+  student_c: { shirt: '#fbc02d', skin: '#8d5a3b', back: backpack('#2e7d32'), head: hood('#f57f17') },
 };
 
 export function allSprites(): SpriteDef[] {

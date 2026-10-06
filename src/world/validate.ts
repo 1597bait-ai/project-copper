@@ -84,7 +84,7 @@ export function validateMap(map: ParsedMap): MapReport {
   }
   if (map.boss && !reachable(map.boss.x, map.boss.y)) errors.push(`Mr. Gravy's start at ${map.boss.x},${map.boss.y} is walled off or blocked`);
   map.patrol.forEach((p, i) => {
-    if (!reachable(p.x, p.y)) errors.push(`Route stop ${i + 1} at ${p.x},${p.y} is walled off or blocked`);
+    if (!reachable(p.x, p.y)) errors.push(`Route stop ${map.patrolStops[i]} at ${p.x},${p.y} is walled off or blocked`);
   });
   for (const s of map.students) if (!reachable(s.x, s.y)) errors.push(`Student at ${s.x},${s.y} is walled off or blocked`);
   for (const d of map.doors) {
@@ -97,7 +97,7 @@ export function validateMap(map: ParsedMap): MapReport {
     const a = map.patrol[i - 1];
     const b = map.patrol[i];
     if (reachable(a.x, a.y) && reachable(b.x, b.y) && !findPath(grid, a.x, a.y, b.x, b.y)) {
-      errors.push(`Mr. Gravy can't walk from stop ${i} to stop ${i + 1}`);
+      errors.push(`Mr. Gravy can't walk from stop ${map.patrolStops[i - 1]} to stop ${map.patrolStops[i]}`);
     }
   }
   return { errors, warnings };

@@ -96,6 +96,18 @@ export const sfx = {
     tone(300, 0, 0.25, 'sawtooth', 0.25);
     tone(300, 0.3, 0.35, 'sawtooth', 0.25);
   },
+  /** A student gasps and yells for Mr. Gravy. */
+  tattle: () => {
+    tone(880, 0, 0.1, 'triangle', 0.22, 1320);
+    tone(1175, 0.13, 0.12, 'square', 0.14);
+    tone(988, 0.27, 0.2, 'square', 0.14);
+  },
+  /** Mr. Gravy hears the report and takes off. */
+  report: () => {
+    tone(392, 0, 0.09, 'sawtooth', 0.18);
+    tone(523, 0.09, 0.09, 'sawtooth', 0.18);
+    tone(784, 0.18, 0.18, 'sawtooth', 0.18, 1046);
+  },
   coffee: () => tone(500, 0, 0.4, 'triangle', 0.2, 250),
   fired: () => [523, 415, 330, 262].forEach((f, i) => tone(f, i * 0.18, 0.22, 'sawtooth', 0.22)),
   shiftOver: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, i * 0.12, 0.18, 'square', 0.18)),

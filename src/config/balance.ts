@@ -1,5 +1,7 @@
 // All the tuning knobs in one place. Distances are in tiles, times in seconds.
 
+import type { RoomKind } from '../world/legend';
+
 /** World pixels per map tile. */
 export const TILE = 64;
 
@@ -65,5 +67,46 @@ export const BALANCE = {
     catchRangeTiles: 0.7,
     /** Seconds he looks around where he last saw you. */
     searchSeconds: 2.5,
+    /** When a student tells on you he sprints to the spot at this multiple of his chase speed. */
+    sprintFactor: 1.35,
+    /** Seconds he looks around the spot a student reported. */
+    respondSearchSeconds: 3,
+  },
+
+  /** Students (board: Speed 1, Awareness 1) who run and tell Mr. Gravy when they catch you scrapping. */
+  students: {
+    /** Strolling speed as a fraction of their Speed-stat pace (Speed 1 = 2.0 tiles/s -> 1.2). */
+    walkFactor: 0.6,
+    /** Running-to-tell speed as a fraction of their pace: 3.0 tiles/s, a little slower than Dalton's 3.2. */
+    runFactor: 1.5,
+    /** How far a student's vision cone reaches (tiles). Shorter than Mr. Gravy's 5. */
+    visionRangeTiles: 3.5,
+    /** Half-angle of a student's vision cone (degrees), so a 70° cone. */
+    visionHalfAngleDeg: 35,
+    /** Seconds of watching you before they go and tell, close up -> at the edge of the cone. */
+    noticeSecondsNear: 1,
+    noticeSecondsFar: 2.2,
+    /** Suspicion lost per second while they can't see you. */
+    suspicionDecay: 0.5,
+    /** Students stroll to spots up to this many tiles from where they start. */
+    wanderRadiusTiles: 8,
+    /** Room kinds students stroll around in (never the office, boiler rooms, storage, janitor's closet or outside). */
+    hangouts: ['hallway', 'classroom', 'lobby', 'restroom', 'lounge'] as RoomKind[],
+    /** Seconds they stand and look around between strolls. */
+    pauseSeconds: [1, 3] as [number, number],
+    /** Seconds they stand and shout before running off to tell. */
+    shoutSeconds: 0.4,
+    /** How close (tiles) they need to get to Mr. Gravy to tell him. */
+    reportRangeTiles: 1.4,
+    /** Seconds they stand there telling him. */
+    reportPauseSeconds: 1.5,
+    /** Seconds after telling (or giving up) that they ignore you. */
+    ignoreSeconds: 8,
+    /** Seconds of trying to reach Mr. Gravy before they give up and go back to wandering. */
+    giveUpSeconds: 20,
+    /** How much a student watching you lights up the red danger edge, relative to Mr. Gravy. */
+    dangerWeight: 0.6,
+    /** Seconds before the same student warning toast can show again. */
+    toastCooldownSeconds: 5,
   },
 };

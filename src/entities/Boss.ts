@@ -8,7 +8,7 @@ import type { Player } from './Player';
 
 const RADIUS = TILE * 0.3;
 
-export type BossState = 'patrol' | 'pause' | 'alert' | 'chase' | 'search' | 'return';
+export type BossState = 'patrol' | 'pause' | 'alert' | 'chase' | 'search' | 'return' | 'respond';
 
 /**
  * Mr. Gravy. Walks a patrol route from the map, looks around at each stop, and gets
@@ -17,6 +17,7 @@ export type BossState = 'patrol' | 'pause' | 'alert' | 'chase' | 'search' | 'ret
  *   patrol -> pause -> patrol ...
  *   sees you: alert (stares, suspicion fills) -> chase -> caught
  *   loses you: search (goes to last seen spot, looks around) -> return -> patrol
+ *   a student tells on you: respond (sprints to where you were seen) -> search -> return
  */
 export class Boss {
   readonly zone: Phaser.GameObjects.Zone;
@@ -38,8 +39,13 @@ export class Boss {
   private lookBase = Math.PI / 2;
   private lastSeen: Point | null = null;
   private grace = 0;
+  /** How old (seconds) his latest news of the player is: his own sighting, a catch, or a report he acted on. */
+  private newsAge = Infinity;
   private repathIn = 0;
   private stuckCheck = { x: 0, y: 0, t: 0 };
+  /** The waypoint being walked to and where that leg started, to notice overshooting it. */
+  private legTo: Point | null = null;
+  private legFrom: Point = { x: 0, y: 0 };
   private readonly range: number;
   private readonly halfAngle: number;
   private readonly chaseSpeed: number;
@@ -85,6 +91,7 @@ export class Boss {
   /** Runs the AI for one frame. Returns true if the player just got caught. */
   update(dt: number, player: Player): boolean {
     this.grace = Math.max(0, this.grace - dt);
+    this.newsAge += dt;
     const target = { x: player.x, y: player.y };
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
     const sees = this.grace <= 0 && player.suspicious && inCone(this.world.sight, this.visionCone, target);
@@ -95,6 +102,7 @@ export class Boss {
       const secondsToCatch = (near + (far - near) * Math.min(1, dist / this.range)) * (2 / this.def.awareness);
       this.suspicion = Math.min(1, this.suspicion + dt / secondsToCatch);
       this.lastSeen = target;
+      this.newsAge = 0;
       if (this.suspicion >= 1) return true;
       if (this.state !== 'chase') this.setState(this.suspicion >= BALANCE.boss.chaseAt ? 'chase' : 'alert');
     } else {
@@ -141,6 +149,12 @@ export class Boss {
         }
         this.follow(dt, speed);
         break;
+      case 'respond':
+        if (this.follow(dt, speed * BALANCE.boss.sprintFactor)) {
+          this.setState('search');
+          this.timer = BALANCE.boss.respondSearchSeconds;
+        }
+        break;
       case 'search':
         if (this.follow(dt, speed * 0.8)) {
           this.stop();
@@ -153,10 +167,25 @@ export class Boss {
     return false;
   }
 
+  /**
+   * A student reports seeing the player at `point`, `age` seconds ago: he sprints there and searches.
+   * Ignored while he is chasing or in his post-warning grace, and when it is older than what he
+   * already knows (he has seen or caught the player since). Returns true if he is on his way.
+   */
+  respondTo(point: Point, age: number): boolean {
+    if (this.state === 'chase' || this.grace > 0 || age >= this.newsAge) return false;
+    this.newsAge = age;
+    this.lastSeen = { ...point };
+    this.setState('respond');
+    this.goTo(point);
+    return true;
+  }
+
   /** After handing out a warning he ignores the player for a moment and goes back to his route. */
   afterCatch(): void {
     this.suspicion = 0;
     this.grace = BALANCE.graceSeconds;
+    this.newsAge = 0;
     this.lastSeen = null;
     this.returnToRoute();
   }
@@ -169,15 +198,16 @@ export class Boss {
     this.sprite.setScale(walking ? 1 + Math.sin(time / 90) * 0.03 : 1);
 
     const chasing = this.state === 'chase';
+    const responding = this.state === 'respond';
     const curious = this.state === 'alert' || this.state === 'search';
-    this.mark.setText(chasing ? '!' : curious ? '?' : '');
-    this.mark.setColor(chasing ? '#ff4d3d' : '#ffd23d');
+    this.mark.setText(chasing || responding ? '!' : curious ? '?' : '');
+    this.mark.setColor(chasing ? '#ff4d3d' : responding ? '#ffa53d' : '#ffd23d');
     this.mark.setPosition(this.x, this.y - 40 + Math.sin(time / 120) * 4);
 
     // Graphics only reads x/y from the points.
     const poly = conePolygon(this.world.sight, this.visionCone) as Phaser.Math.Vector2[];
-    const color = chasing ? 0xff4d3d : this.suspicion > 0 || curious ? 0xffa53d : 0xfff1a8;
-    const alpha = this.grace > 0 ? 0.08 : chasing ? 0.3 : 0.2;
+    const color = chasing ? 0xff4d3d : this.suspicion > 0 || curious || responding ? 0xffa53d : 0xfff1a8;
+    const alpha = this.grace > 0 ? 0.08 : chasing ? 0.3 : responding ? 0.26 : 0.2;
     this.cone.clear();
     this.cone.fillStyle(color, alpha).fillPoints(poly, true);
     this.cone.lineStyle(3, color, alpha * 2).strokePoints(poly, true);
@@ -220,16 +250,25 @@ export class Boss {
     const from = nav.toTile(this.x, this.y);
     const to = nav.toTile(p.x, p.y);
     const tiles = findPath(nav, from.tx, from.ty, to.tx, to.ty);
-    this.path = tiles ? smoothPath(nav, tiles, RADIUS).slice(1) : [];
+    this.path = tiles ? this.fromHere(smoothPath(nav, tiles, RADIUS)) : [];
     // Finish on the exact point when it is reachable (e.g. the player's last seen position).
     if (tiles && !nav.blockedAtWorld(p.x, p.y) && this.path.length) this.path[this.path.length - 1] = { ...p };
     this.stuckCheck = { x: this.x, y: this.y, t: 0 };
   }
 
+  /**
+   * A smoothed path starts at the centre of his tile. Skip that only if he can head straight for the
+   * next waypoint from where he actually stands: an off-centre start can clip a door jamb on the way.
+   */
+  private fromHere(pts: Point[]): Point[] {
+    return pts.length > 1 && clearLine(this.world.nav, this, pts[1], RADIUS) ? pts.slice(1) : pts;
+  }
+
   /** Walks along the current path. Returns true when there is nowhere left to go. */
   private follow(dt: number, speed: number): boolean {
-    while (this.path.length && Phaser.Math.Distance.Between(this.x, this.y, this.path[0].x, this.path[0].y) < 8) {
-      this.path.shift();
+    while (this.path.length && this.reached(this.path[0])) {
+      this.legFrom = this.path.shift()!;
+      this.legTo = this.path[0] ?? null;
     }
     if (!this.path.length) {
       this.stop();
@@ -249,6 +288,17 @@ export class Boss {
       if (moved < speed * 0.15) this.goTo(goal);
     }
     return false;
+  }
+
+  /** Close enough, or already past it: at low frame rates (or sprinting) one physics step can jump over the 8 px radius. */
+  private reached(p: Point): boolean {
+    if (p !== this.legTo) {
+      this.legTo = p;
+      this.legFrom = { x: this.x, y: this.y };
+    }
+    const dx = p.x - this.x;
+    const dy = p.y - this.y;
+    return dx * dx + dy * dy < 64 || dx * (p.x - this.legFrom.x) + dy * (p.y - this.legFrom.y) < 0;
   }
 
   private stop() {

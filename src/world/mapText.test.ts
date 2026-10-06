@@ -68,6 +68,14 @@ describe('map text format', () => {
     expect(report.errors.some((e) => e.includes('No player start'))).toBe(true);
   });
 
+  it('names route stops by their digit, even with gaps', () => {
+    const gappy = parseMap(SMALL.replace('B.1....2.B', 'B.1....5.B').replace('B........B', 'B######3#B'));
+    expect(gappy.patrolStops).toEqual([1, 3, 5]);
+    const report = validateMap(gappy);
+    expect(report.errors.some((e) => e.startsWith('Route stop 3 at'))).toBe(true);
+    expect(report.errors.some((e) => e.includes('stop 2'))).toBe(false);
+  });
+
   it('finds unreachable loot', () => {
     const walled = parseMap(SMALL.replace('B,,,,.f..B', 'B,,,,#f..B').replace('B,,d,....B', 'B,,d,#...B').replace('B,,,,....B', 'B,,,,#...B').replace('B###.##LLB', 'B######LLB'));
     const report = validateMap(walled);

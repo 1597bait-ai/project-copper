@@ -84,8 +84,17 @@ export class ShiftEndScene extends Phaser.Scene {
     const again = s.fired ? 'TRY AGAIN' : 'NEXT SHIFT';
     const by = portrait ? y + 240 : H - 150;
     const replay = () => this.scene.start('Game', { character: s.character, mapText: s.mapText });
-    new Button(this, cx - 240, by, again, replay, { width: 420, height: 104, fontSize: 44 });
-    new Button(this, cx + 240, by, 'MENU', () => this.scene.start('Menu'), { width: 420, height: 104, fontSize: 44, fill: 0x3d4558 });
+    const grey = { width: 420, height: 104, fontSize: 44, fill: 0x3d4558 };
+    if (s.mapText && !portrait) {
+      // Played a map from the editor: offer the way straight back to it.
+      new Button(this, cx - 460, by, again, replay, { width: 400, height: 104, fontSize: 44 });
+      new Button(this, cx, by, 'EDIT MAP', () => this.scene.start('Editor', { mapText: s.mapText }), { ...grey, width: 400 });
+      new Button(this, cx + 460, by, 'MENU', () => this.scene.start('Menu'), { ...grey, width: 400 });
+    } else {
+      new Button(this, cx - 240, by, again, replay, { width: 420, height: 104, fontSize: 44 });
+      new Button(this, cx + 240, by, 'MENU', () => this.scene.start('Menu'), grey);
+      if (s.mapText) new Button(this, cx, by + 130, 'EDIT MAP', () => this.scene.start('Editor', { mapText: s.mapText }), { ...grey, width: 900 });
+    }
 
     this.input.keyboard!.once('keydown-ENTER', replay);
     this.input.keyboard!.once('keydown-ESC', () => this.scene.start('Menu'));

@@ -30,10 +30,11 @@ export class MenuScene extends Phaser.Scene {
     this.cards = [];
     const portrait = isPortrait(this.scale);
     if (!portrait) this.cameras.main.setZoom(1).setScroll(0, 0);
-    const { width: W, height: H } = portrait ? fitColumn(this, 1080, 1800) : { width: this.scale.width, height: this.scale.height };
+    const columnH = 1900;
+    const { width: W, height: H } = portrait ? fitColumn(this, 1080, columnH) : { width: this.scale.width, height: this.scale.height };
     const cx = W / 2;
     // Portrait content is a 1080-wide column, vertically centred.
-    const top = portrait ? Math.max(0, (H - 1800) / 2) : 0;
+    const top = portrait ? Math.max(0, (H - columnH) / 2) : 0;
 
     this.drawBackground(W, H);
 
@@ -67,12 +68,25 @@ export class MenuScene extends Phaser.Scene {
     }
     this.refreshCards();
 
-    new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { width: portrait ? 700 : 520, height: 112, fontSize: 52 });
+    // START SHIFT with the (secondary, grey) MAP EDITOR beside it in landscape, under it in portrait.
+    const editor = { fill: 0x3d4558, fontSize: 38 };
+    if (portrait) {
+      new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { width: 700, height: 112, fontSize: 52 });
+      buttonY += 132;
+      new Button(this, cx, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: 480, height: 88 });
+    } else {
+      const gap = 40;
+      const startW = 520;
+      const editorW = 360;
+      const left = cx - (startW + gap + editorW) / 2;
+      new Button(this, left + startW / 2, buttonY, 'START SHIFT', () => this.play(), { width: startW, height: 112, fontSize: 52 });
+      new Button(this, left + startW + gap + editorW / 2, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: editorW, height: 96 });
+    }
 
     const help = isTouchDevice()
       ? `Left thumb moves  ·  big button scraps  ·  bring scrap to the white van to sell it${portrait ? '  ·  turn sideways for a wider view' : ''}`
       : 'WASD / arrows move  ·  E scraps  ·  Q uses your ability  ·  bring scrap to the white van to sell it';
-    const footY = portrait ? buttonY + 110 : H - 70;
+    const footY = portrait ? buttonY + 90 : H - 70;
     this.add.text(cx, footY, help, textStyle(24, COLORS.muted, { align: 'center', wordWrap: { width: portrait ? 900 : 1800 } })).setOrigin(0.5, 0);
     if (save.bestShift > 0) {
       this.add
@@ -175,6 +189,17 @@ export class MenuScene extends Phaser.Scene {
       g.lineStyle(on ? 8 : 3, on ? c.color : 0x3a4152, 1).strokeRoundedRect(card.x, card.y, card.w, card.h, 24);
       if (on) g.fillStyle(c.color, 0.12).fillRoundedRect(card.x, card.y, card.w, card.h, 24);
     }
+  }
+
+  private openEditor() {
+    if (this.starting) return;
+    this.starting = true;
+    unlockAudio();
+    sfx.click();
+    // The editor's PLAY (and the menu rebuilt by BACK) use the saved crew member.
+    updateSave((d) => (d.character = this.selected));
+    this.cameras.main.fadeOut(200, 20, 22, 28);
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start('Editor'));
   }
 
   private play() {

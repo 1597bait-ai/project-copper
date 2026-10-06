@@ -6,12 +6,13 @@ export interface NpcDef {
   speed: number;
   awareness: number;
   sprite: string;
+  /** Alternative looks, handed out by index so a crowd doesn't look cloned. */
+  variants?: string[];
 }
 
 export const NPCS: Record<string, NpcDef> = {
   mr_gravy: { id: 'mr_gravy', name: 'Mr. Gravy', speed: 2, awareness: 2, sprite: 'mr_gravy' },
-  // Not in the first playable yet:
-  student: { id: 'student', name: 'Student', speed: 1, awareness: 1, sprite: 'student' },
+  student: { id: 'student', name: 'Student', speed: 1, awareness: 1, sprite: 'student', variants: ['student', 'student_b', 'student_c'] },
 };
 
 // Planned (design board): the Sleepy Coworker — very, very sleepy, always asleep at work,

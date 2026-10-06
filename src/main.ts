@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene';
+import { EditorScene } from './scenes/EditorScene';
 import { GameScene } from './scenes/GameScene';
 import { HudScene } from './scenes/HudScene';
 import { MenuScene } from './scenes/MenuScene';
@@ -19,7 +20,7 @@ const game = new Phaser.Game({
   },
   physics: { default: 'arcade', arcade: { debug: false } },
   input: { activePointers: 4, gamepad: true },
-  scene: [BootScene, MenuScene, GameScene, HudScene, ShiftEndScene],
+  scene: [BootScene, MenuScene, GameScene, HudScene, ShiftEndScene, EditorScene],
 });
 
 // Handy for debugging in the browser console and for the automated smoke test.
