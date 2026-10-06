@@ -1,6 +1,9 @@
 import Phaser from 'phaser';
 import { TILE } from '../config/balance';
+import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
+import { doorKey } from '../entities/Door';
+import { fixtureLook } from '../entities/Fixture';
 import { loadSave } from '../systems/save';
 import { sfx, unlockAudio } from '../systems/sfx';
 import { COLORS, cssPerGamePixel, isPortrait, isTouchDevice, textStyle } from '../ui/theme';
@@ -10,6 +13,7 @@ import {
   ROUTE_STOP,
   VAN,
   describeCell,
+  isBlockTool,
   isDragTool,
   lineCells,
   loadEditorMap,
@@ -18,10 +22,12 @@ import {
   saveEditorMap,
   vanRect,
 } from '../world/editing';
-import { FIXTURE_CHARS, OBJECT_BY_CHAR, TILES, TILE_INDEX } from '../world/legend';
+import { TILESET_MARGIN, TILESET_SPACING, TILESET_TEXTURE, TILE_FRAMES, frameName, iconFrame, tileLayers } from '../world/autotile';
+import { DECOR_CHARS, FIXTURE_CHARS, OBJECT_BY_CHAR, TILES } from '../world/legend';
 import { parseMap, serializeMap, type ParsedMap, type TilePoint } from '../world/mapText';
-import { DEFAULT_MAP, TILESET_TEXTURE } from '../world/maps';
+import { DEFAULT_MAP } from '../world/maps';
 import { validateMap, type MapReport } from '../world/validate';
+import { decorKey, fixtureMount, standOnFloor, vanKey } from '../world/World';
 
 type Camera = Phaser.Cameras.Scene2D.Camera;
 type Pointer = Phaser.Input.Pointer;
@@ -58,7 +64,8 @@ interface Snapshot {
 const TILE_LABELS: Record<string, string> = {
   '.': 'Hallway',
   ',': 'Class',
-  '~': 'Restroom',
+  '~': 'Blue tile',
+  '^': 'Pink tile',
   b: 'Boiler',
   o: 'Office',
   j: 'Janitor',
@@ -72,6 +79,7 @@ const TILE_LABELS: Record<string, string> = {
   '=': 'Lobby',
   k: 'Storage',
   n: 'Lounge',
+  W: 'Board',
 };
 
 const FIXTURE_LABELS: Record<string, string> = {
@@ -82,9 +90,17 @@ const FIXTURE_LABELS: Record<string, string> = {
   abandoned_copper_pile: 'Copper',
   desk: 'Desk',
   lamp: 'Lamp',
+  electric_panel: 'Panel',
 };
 
-/** Every palette entry, in palette order. New tiles and fixtures in the legend show up automatically. */
+const DECOR_LABELS: Record<string, string> = {
+  plant: 'Plant',
+  trash_can: 'Trash can',
+  tree: 'Tree',
+  car: 'Car',
+};
+
+/** Every palette entry, in palette order. New tiles, fixtures and decorations in the legend show up automatically. */
 function toolList(): ToolDef[] {
   const tiles: ToolDef[] = TILES.map((t) => ({
     id: t.char,
@@ -96,6 +112,10 @@ function toolList(): ToolDef[] {
     const name = FIXTURES[id]?.name ?? id;
     return { id: ch, group: 'Things', label: FIXTURE_LABELS[id] ?? name.split(' ').pop()!, name };
   });
+  const decor: ToolDef[] = Object.entries(DECOR_CHARS).map(([ch, id]) => {
+    const name = DECOR[id]?.name ?? id;
+    return { id: ch, group: 'Things', label: DECOR_LABELS[id] ?? name.split(' ').pop()!, name };
+  });
   const thing = (id: string, label: string, name: string): ToolDef => ({ id, group: 'Things', label, name });
   return [
     { id: PAN, group: 'Tools', label: 'Pan', name: 'Pan' },
@@ -103,6 +123,7 @@ function toolList(): ToolDef[] {
     ...tiles.filter((t) => t.group === 'Floors'),
     ...tiles.filter((t) => t.group === 'Walls'),
     ...fixtures,
+    ...decor,
     thing('P', 'Dalton', 'Player start'),
     thing('G', 'Gravy', 'Mr. Gravy start'),
     thing('S', 'Student', 'Student'),
@@ -552,15 +573,18 @@ export class EditorScene extends Phaser.Scene {
     this.parsed = parseMap(this.mapText());
     const map = this.parsed;
     if (!this.tilemap || this.tilemap.width !== map.width || this.tilemap.height !== map.height) this.buildMapLayers(map.width, map.height);
+    // Same autotiling as the game. Every cell is re-picked, so painting a wall also fixes up the
+    // walls and floor shadows around it; only cells whose frame changed are touched.
+    const frames = tileLayers(map);
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
-        const f = map.floor[y][x];
+        const f = frames.floor[y][x];
         if (this.shownFloor[y][x] !== f) {
           if (f >= 0) this.floorLayer.putTileAt(f, x, y);
           else this.floorLayer.removeTileAt(x, y);
           this.shownFloor[y][x] = f;
         }
-        const w = map.walls[y][x];
+        const w = frames.walls[y][x];
         if (this.shownWalls[y][x] !== w) {
           if (w >= 0) this.wallLayer.putTileAt(w, x, y);
           else this.wallLayer.removeTileAt(x, y);
@@ -583,7 +607,7 @@ export class EditorScene extends Phaser.Scene {
   private buildMapLayers(width: number, height: number) {
     this.tilemap?.destroy();
     const tilemap = this.make.tilemap({ width, height, tileWidth: TILE, tileHeight: TILE });
-    const tileset = tilemap.addTilesetImage('school', TILESET_TEXTURE, TILE, TILE, 0, 0)!;
+    const tileset = tilemap.addTilesetImage('school', TILESET_TEXTURE, TILE, TILE, TILESET_MARGIN, TILESET_SPACING)!;
     this.floorLayer = tilemap.createBlankLayer('floor', tileset, 0, 0)!.setDepth(0);
     this.wallLayer = tilemap.createBlankLayer('walls', tileset, 0, 0)!.setDepth(1);
     this.onlyOn(this.mapCam, this.floorLayer, this.wallLayer);
@@ -616,7 +640,7 @@ export class EditorScene extends Phaser.Scene {
         if (!(ch in OBJECT_BY_CHAR)) continue;
         key += `${x},${y}${ch}`;
         const id = FIXTURE_CHARS[ch];
-        if (id && FIXTURES[id]?.wallMounted) key += wallRotation(map, x, y).toFixed(2);
+        if (id && FIXTURES[id]?.wallMounted) key += fixtureMount(map, x, y);
         key += ';';
       }
     }
@@ -629,32 +653,31 @@ export class EditorScene extends Phaser.Scene {
     const layer = this.objects;
     layer.removeAll(true);
     const center = (x: number, y: number) => ({ cx: (x + 0.5) * TILE, cy: (y + 0.5) * TILE });
-    const image = (key: string, x: number, y: number) => this.add.image(x, y, this.textures.exists(key) ? key : '__MISSING');
+    const image = (key: string, x = 0, y = 0) => this.add.image(x, y, this.textures.exists(key) ? key : '__MISSING');
 
     for (const d of map.doors) {
-      const vertical = d.h > d.w;
-      layer.add(
-        image('door_locked', (d.x + d.w / 2) * TILE, (d.y + d.h / 2) * TILE)
-          .setRotation(vertical ? Math.PI / 2 : 0)
-          .setDisplaySize(Math.max(d.w, d.h) * TILE, Math.min(d.w, d.h) * TILE),
-      );
+      const rect = { width: d.w * TILE, height: d.h * TILE };
+      layer.add(image(doorKey(rect, true, TILE), (d.x + d.w / 2) * TILE, (d.y + d.h / 2) * TILE).setDisplaySize(rect.width, rect.height));
     }
 
-    const people: Phaser.GameObjects.GameObject[] = [];
+    // Things standing on the floor, drawn back to front like in the game (the container draws in list order).
+    const standing: Phaser.GameObjects.Image[] = [];
     const stops: TilePoint[] = [];
     const strays = this.add.graphics();
     const v = map.van;
     for (let y = 0; y < map.height; y++) {
       for (let x = 0; x < map.width; x++) {
         const ch = map.rows[y][x];
-        const { cx, cy } = center(x, y);
         const fixture = FIXTURE_CHARS[ch];
-        if (fixture) {
-          const rotation = FIXTURES[fixture]?.wallMounted ? wallRotation(map, x, y) : 0;
-          layer.add(image(fixture, cx, cy).setRotation(rotation).setDisplaySize(TILE, TILE));
+        const def = fixture ? FIXTURES[fixture] : undefined;
+        if (def) {
+          const look = fixtureLook(this.textures, def, def.wallMounted ? fixtureMount(map, x, y) : 'front');
+          standing.push(standOnFloor(image(look.key).setFlipX(look.flipX), { x, y, w: 1, h: 1 }));
         } else if (ch === 'P' || ch === 'G' || ch === 'S') {
-          const key = ch === 'P' ? 'dalton' : ch === 'G' ? 'mr_gravy' : 'student';
-          people.push(image(key, cx, cy).setRotation(-Math.PI / 2));
+          // People face the camera, feet near the bottom of their tile.
+          const person = standOnFloor(image(ch === 'P' ? 'dalton' : ch === 'G' ? 'mr_gravy' : 'student'), { x, y, w: 1, h: 1 });
+          if (person.height > TILE * 1.6) person.setScale((TILE * 1.6) / person.height);
+          standing.push(person.setY(person.y - 4));
         } else if (ch >= '1' && ch <= '9') {
           stops.push({ x, y });
         } else if (ch === VAN && !(v && x >= v.x && y >= v.y && x < v.x + v.w && y < v.y + v.h)) {
@@ -664,17 +687,12 @@ export class EditorScene extends Phaser.Scene {
         }
       }
     }
-    if (v) {
-      // The van art is drawn nose-up (tall); turn it when the block is wider than tall, like World.ts.
-      const sideways = v.w > v.h;
-      layer.add(
-        image('van', (v.x + v.w / 2) * TILE, (v.y + v.h / 2) * TILE)
-          .setRotation(sideways ? -Math.PI / 2 : 0)
-          .setDisplaySize((sideways ? v.h : v.w) * TILE, (sideways ? v.w : v.h) * TILE),
-      );
-    }
+    for (const d of map.decor) standing.push(standOnFloor(image(decorKey(d)), d));
+    // Drawn facing the camera like World.ts: from the side when wide, from the front when tall.
+    if (v) standing.push(standOnFloor(image(vanKey(v)), v).setDisplaySize(v.w * TILE, v.h * TILE));
+    standing.sort((a, b) => a.depth - b.depth);
+    layer.add(standing);
     layer.add(strays);
-    layer.add(people);
 
     // Mr. Gravy's route: stops joined in order and back to the first, with arrows for direction.
     const route = this.add.graphics();
@@ -905,25 +923,24 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private makeIcon(id: string, s: number): Icon {
-    const index = TILE_INDEX[id];
-    if (index !== undefined) return this.add.image(0, 0, TILESET_TEXTURE, this.tileFrame(index)).setDisplaySize(s, s);
-    const sprite = (key: string, rotation = 0, size = s) => {
-      const img = this.add.image(0, 0, this.textures.exists(key) ? key : '__MISSING');
-      return img.setScale(size / Math.max(img.width, img.height)).setRotation(rotation);
-    };
+    const frame = id.length === 1 ? iconFrame(id) : -1;
+    if (frame >= 0) return this.add.image(0, 0, TILESET_TEXTURE, frameName(TILE_FRAMES[frame])).setDisplaySize(s, s);
+    const sprite = (key: string, size = s) => this.fitIcon(this.add.image(0, 0, this.textures.exists(key) ? key : '__MISSING'), size);
     const fixture = FIXTURE_CHARS[id];
     if (fixture) return sprite(fixture);
+    const decor = DECOR_CHARS[id];
+    if (decor) return sprite(decorKey({ id: decor, x: 0, y: 0 }));
     switch (id) {
       case 'P':
-        return sprite('dalton', -Math.PI / 2);
+        return sprite('dalton');
       case 'G':
-        return sprite('mr_gravy', -Math.PI / 2);
+        return sprite('mr_gravy');
       case 'S':
-        return sprite('student', -Math.PI / 2);
+        return sprite('student');
       case 'L':
         return sprite('door_locked');
       case VAN: {
-        const img = sprite('van', this.vanRotated ? 0 : -Math.PI / 2, s * 1.05);
+        const img = sprite(this.vanRotated ? 'van_tall' : 'van', s * 1.05).setData('size', s * 1.05);
         this.vanIcons.push(img);
         return img;
       }
@@ -976,15 +993,9 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
-  /** A named frame for one tile of the tileset (tiles are TILE px squares in legend order). */
-  private tileFrame(index: number): string {
-    const tex = this.textures.get(TILESET_TEXTURE);
-    const name = `editor-tile-${index}`;
-    if (!tex.has(name)) {
-      const cols = Math.max(1, Math.floor(tex.source[0].width / TILE));
-      tex.add(name, 0, (index % cols) * TILE, Math.floor(index / cols) * TILE, TILE, TILE);
-    }
-    return name;
+  /** Scales a palette icon so its longer side is `size`. */
+  private fitIcon(img: Phaser.GameObjects.Image, size: number): Phaser.GameObjects.Image {
+    return img.setScale(size / Math.max(img.width, img.height));
   }
 
   private refreshPalette() {
@@ -996,7 +1007,10 @@ export class EditorScene extends Phaser.Scene {
       item.bg.fillStyle(on ? 0x3a2b1f : 0x1f2430, 1).fillRoundedRect(0, 0, w, h, 8 * u);
       item.bg.lineStyle(on ? 3 * u : 1.5 * u, on ? 0xe8914a : 0x2f3645, 1).strokeRoundedRect(0, 0, w, h, 8 * u);
     }
-    for (const img of this.vanIcons) img.setRotation(this.vanRotated ? 0 : -Math.PI / 2);
+    for (const img of this.vanIcons) {
+      const key = this.vanRotated ? 'van_tall' : 'van';
+      if (img.texture.key !== key) this.fitIcon(img.setTexture(key), img.getData('size') as number);
+    }
   }
 
   private setPalScroll(v: number) {
@@ -1190,6 +1204,10 @@ export class EditorScene extends Phaser.Scene {
       const v = vanRect(this.rows, c.x, c.y, this.vanRotated);
       if (!v || c.x < 0 || c.y < 0 || c.x >= this.parsed.width || c.y >= this.parsed.height) return;
       r = v;
+    } else if (isBlockTool(t)) {
+      // Big decorations (cars) are stamped with the tapped tile at their top-left, pushed inside the map.
+      const { w, h } = DECOR[DECOR_CHARS[t]];
+      r = { x: Phaser.Math.Clamp(c.x, 0, this.parsed.width - w), y: Phaser.Math.Clamp(c.y, 0, this.parsed.height - h), w, h };
     }
     g.fillStyle(color, 0.12).fillRect(r.x * TILE, r.y * TILE, r.w * TILE, r.h * TILE);
     g.lineStyle(line, color, 0.9).strokeRect(r.x * TILE, r.y * TILE, r.w * TILE, r.h * TILE);
@@ -1713,14 +1731,4 @@ export class EditorScene extends Phaser.Scene {
   };
 
   private onContextMenu = (e: Event) => e.preventDefault();
-}
-
-/** Wall-mounted fixtures face away from their wall (same rule as World.ts). */
-function wallRotation(map: ParsedMap, x: number, y: number): number {
-  const wall = (cx: number, cy: number) => cx < 0 || cy < 0 || cx >= map.width || cy >= map.height || map.walls[cy][cx] >= 0;
-  if (wall(x, y - 1)) return 0;
-  if (wall(x, y + 1)) return Math.PI;
-  if (wall(x - 1, y)) return -Math.PI / 2;
-  if (wall(x + 1, y)) return Math.PI / 2;
-  return 0;
 }

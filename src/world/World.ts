@@ -1,13 +1,15 @@
 import Phaser from 'phaser';
+import { CAR_KEYS } from '../art/objects';
 import { BALANCE, TILE } from '../config/balance';
 import { FIXTURES } from '../config/fixtures';
 import { Door } from '../entities/Door';
 import { Fixture } from '../entities/Fixture';
 import { Grid } from '../systems/Grid';
 import type { Point } from '../systems/pathfinding';
-import { TILES, type RoomKind } from './legend';
-import type { ParsedMap } from './mapText';
-import { TILESET_TEXTURE } from './maps';
+import { sortDepth } from '../ui/depth';
+import { TILESET_MARGIN, TILESET_SPACING, TILESET_TEXTURE, pickForCell, tileLayers, wallMount, type Mount } from './autotile';
+import type { RoomKind } from './legend';
+import type { ParsedMap, TileRect } from './mapText';
 import { wallGrid } from './validate';
 
 export interface Room {
@@ -22,21 +24,58 @@ export interface Van {
   image: Phaser.GameObjects.Image;
 }
 
-/** Tile indexes that block movement and sight. */
-const COLLIDING = TILES.flatMap((t, i) => (t.collides ? [i] : []));
+// ---- How things stand on the map (shared with the map editor) ------------------------------
+
+/**
+ * Stands an image on the floor: its bottom edge on the bottom of the cells it covers, centred,
+ * and sorted by that edge so whoever stands lower on screen is drawn in front.
+ */
+export function standOnFloor<T extends Phaser.GameObjects.Image>(image: T, rect: TileRect): T {
+  const bottom = (rect.y + rect.h) * TILE;
+  return image.setOrigin(0.5, 1).setPosition((rect.x + rect.w / 2) * TILE, bottom).setDepth(sortDepth(bottom));
+}
+
+/** Texture for a decoration: cars get a colour picked by where they are parked. */
+export function decorKey(d: { id: string; x: number; y: number }): string {
+  return d.id === 'car' ? pickForCell(CAR_KEYS, d.x, d.y, 17) : d.id;
+}
+
+/** The van seen from the side for a wide block (4x2), from the front for a tall one (2x4). */
+export function vanKey(rect: TileRect): string {
+  return rect.w >= rect.h ? 'van' : 'van_tall';
+}
+
+/** Which wall a wall-mounted fixture hangs on (front view when it's above, side view left/right). */
+export function fixtureMount(map: ParsedMap, x: number, y: number): Mount {
+  const wall = (cx: number, cy: number) => cx >= 0 && cy >= 0 && cx < map.width && cy < map.height && map.walls[cy][cx] >= 0;
+  return wallMount(wall, x, y);
+}
+
+/** Two tilemap layers (floor, walls) drawing the map with autotiled frames from the generated tileset. */
+export function addTileLayers(scene: Phaser.Scene, map: ParsedMap): { floor: Phaser.Tilemaps.TilemapLayer; walls: Phaser.Tilemaps.TilemapLayer } {
+  const frames = tileLayers(map);
+  const layer = (data: number[][], depth: number) => {
+    const tilemap = scene.make.tilemap({ data, tileWidth: TILE, tileHeight: TILE });
+    const tileset = tilemap.addTilesetImage('school', TILESET_TEXTURE, TILE, TILE, TILESET_MARGIN, TILESET_SPACING)!;
+    return (tilemap.createLayer(0, tileset, 0, 0) as Phaser.Tilemaps.TilemapLayer).setDepth(depth);
+  };
+  return { floor: layer(frames.floor, 0), walls: layer(frames.walls, 1) };
+}
 
 /** Builds a playable level from a parsed text map (see src/world/mapText.ts). */
 export class World {
   readonly walls: Phaser.Tilemaps.TilemapLayer;
   readonly width: number;
   readonly height: number;
-  /** Blocked for walking / pathfinding: walls, solid fixtures, locked doors, the van. */
+  /** Blocked for walking / pathfinding: walls, solid fixtures, decorations, locked doors, the van. */
   readonly nav: Grid;
-  /** Blocks line of sight: walls and closed doors. */
+  /** Blocks line of sight: walls and closed doors (decorations are see-through). */
   readonly sight: Grid;
   readonly solids: Phaser.Physics.Arcade.StaticGroup;
   readonly fixtures: Fixture[] = [];
   readonly doors: Door[] = [];
+  /** Plants, trash cans, trees and parked cars. */
+  readonly decor: Phaser.GameObjects.Image[] = [];
   readonly rooms: Room[];
   readonly patrol: Point[];
   readonly playerSpawn: Point;
@@ -51,21 +90,19 @@ export class World {
     if (!map.player || !map.boss || !map.van) throw new Error('Map needs a player start (P), Mr. Gravy (G) and a van (V)');
     const center = (p: { x: number; y: number }): Point => ({ x: (p.x + 0.5) * TILE, y: (p.y + 0.5) * TILE });
 
-    const layer = (data: number[][], depth: number) => {
-      const tilemap = scene.make.tilemap({ data, tileWidth: TILE, tileHeight: TILE });
-      const tileset = tilemap.addTilesetImage('school', TILESET_TEXTURE, TILE, TILE, 0, 0)!;
-      return (tilemap.createLayer(0, tileset, 0, 0) as Phaser.Tilemaps.TilemapLayer).setDepth(depth);
-    };
-    layer(map.floor, 0);
-    this.walls = layer(map.walls, 1);
-    this.walls.setCollision(COLLIDING);
+    const layers = addTileLayers(scene, map);
+    this.walls = layers.walls;
+    this.walls.setCollisionByExclusion([-1]);
     this.width = map.width * TILE;
     this.height = map.height * TILE;
 
-    const walls = wallGrid(map);
     this.nav = wallGrid(map);
     this.sight = wallGrid(map);
     this.solids = scene.physics.add.staticGroup();
+    const block = (r: TileRect, inset: number) => {
+      for (let ty = r.y; ty < r.y + r.h; ty++) for (let tx = r.x; tx < r.x + r.w; tx++) this.nav.set(tx, ty, true);
+      this.solids.add(scene.add.zone((r.x + r.w / 2) * TILE, (r.y + r.h / 2) * TILE, r.w * TILE - inset * 2, r.h * TILE - inset * 2));
+    };
 
     this.rooms = map.rooms.map((r) => ({
       name: r.name,
@@ -81,11 +118,14 @@ export class World {
       const def = FIXTURES[f.id];
       if (!def) continue;
       const { x, y } = center(f);
-      this.fixtures.push(new Fixture(scene, def, x, y, def.wallMounted ? wallRotation(walls, f.x, f.y) : 0));
-      if (def.solid) {
-        this.nav.set(f.x, f.y, true);
-        this.solids.add(scene.add.zone(x, y, TILE * 0.8, TILE * 0.8));
-      }
+      this.fixtures.push(new Fixture(scene, def, x, y, def.wallMounted ? fixtureMount(map, f.x, f.y) : 'front'));
+      if (def.solid) block({ x: f.x, y: f.y, w: 1, h: 1 }, TILE * 0.1);
+    }
+
+    for (const d of map.decor) {
+      this.decor.push(standOnFloor(scene.add.image(0, 0, decorKey(d)), d));
+      // Solid but see-through: blocks walking only.
+      block(d, d.w > 1 || d.h > 1 ? 6 : TILE * 0.12);
     }
 
     for (const d of map.doors) {
@@ -97,15 +137,9 @@ export class World {
     const rect = new Phaser.Geom.Rectangle(v.x * TILE, v.y * TILE, v.w * TILE, v.h * TILE);
     const pad = BALANCE.vanReachTiles * TILE;
     const reach = new Phaser.Geom.Rectangle(rect.x - pad, rect.y - pad, rect.width + pad * 2, rect.height + pad * 2);
-    // The van art is drawn nose-up (tall); turn it when the van block is wider than tall.
-    const sideways = rect.width > rect.height;
-    const image = scene.add
-      .image(rect.centerX, rect.centerY, 'van')
-      .setRotation(sideways ? -Math.PI / 2 : 0)
-      .setDisplaySize(sideways ? rect.height : rect.width, sideways ? rect.width : rect.height)
-      .setDepth(6);
-    this.solids.add(scene.add.zone(rect.centerX, rect.centerY, rect.width - 12, rect.height - 12));
-    for (let ty = v.y; ty < v.y + v.h; ty++) for (let tx = v.x; tx < v.x + v.w; tx++) this.nav.set(tx, ty, true);
+    // Drawn facing the camera, never turned: a side view for a wide block, a front view for a tall one.
+    const image = standOnFloor(scene.add.image(0, 0, vanKey(v)), v).setDisplaySize(rect.width, rect.height);
+    block(v, 6);
     this.van = { rect, reach, image };
   }
 
@@ -123,13 +157,4 @@ export class World {
   roomKindAt(x: number, y: number): RoomKind | null {
     return this.rooms[this.roomIndexAt(x, y)]?.kind ?? null;
   }
-}
-
-/** Wall-mounted sprites are drawn against the top edge; turn them to face away from their wall. */
-function wallRotation(walls: Grid, tx: number, ty: number): number {
-  if (walls.blocked(tx, ty - 1)) return 0;
-  if (walls.blocked(tx, ty + 1)) return Math.PI;
-  if (walls.blocked(tx - 1, ty)) return -Math.PI / 2;
-  if (walls.blocked(tx + 1, ty)) return Math.PI / 2;
-  return 0;
 }

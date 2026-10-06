@@ -1,80 +1,83 @@
 import Phaser from 'phaser';
 import { BALANCE, TILE } from '../config/balance';
-import type { NpcDef } from '../config/npcs';
+import { STUDENT_LINES, type NpcDef } from '../config/npcs';
 import { clearLine, findPath, smoothPath, type Point } from '../systems/pathfinding';
+import { calmDown, followHolds, mindDanger, newMind, think, type MindTuning, type StudentMind, type Yell } from '../systems/studentMind';
 import { conePolygon, inCone, type Cone } from '../systems/vision';
 import { pickWanderTarget, wanderArea } from '../systems/wander';
-import { textStyle } from '../ui/theme';
+import { DEPTH } from '../ui/depth';
 import type { World } from '../world/World';
-import type { Boss } from './Boss';
 import { CharacterView } from './CharacterView';
 import type { Player } from './Player';
+import { Emote, SpeechBubble } from './SpeechBubble';
 
 const RADIUS = TILE * 0.28;
-/** Students are drawn a bit smaller than the grown-ups. */
-const SCALE = 0.86;
-/** Mr. Gravy keeps moving, so the route to him is re-planned this often (seconds). */
+/** The route to where Dalton was last seen is re-planned this often while following (seconds). */
 const REPATH_SECONDS = 0.5;
-/** Failed route searches in a row before a student gives up on telling. */
-const MAX_FAILED_PATHS = 3;
 /** Speech bubbles wrap at this width (world px) so they still fit on a zoomed-in phone screen. */
-const BUBBLE_WRAP = 300;
-const INK = 0x1b1d24;
+const BUBBLE_WRAP = 280;
+/** Seconds a yell's speech bubble stays up after the yell itself. */
+const YELL_BUBBLE_EXTRA = 0.7;
+const CHATTER_SECONDS = 2.8;
 
-const REPORT_LINES = ["That guy's stealing pipes!", 'Mr. Gravy! Someone has a bag full of copper!', "He's ripping stuff off the walls!"];
+const TUNING: MindTuning = BALANCE.students;
 
-export type StudentState = 'idle' | 'walk' | 'notice' | 'tattle' | 'report';
+const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
 
-/** Things the scene reacts to with sounds and toasts. */
-export type StudentEvent = 'saw' | 'reported';
+export type StudentState = 'idle' | 'walk' | 'notice' | 'yell' | 'follow';
+
+/** A student just yelled for Mr. Gravy. The scene decides whether he heard it. */
+export interface StudentYell {
+  why: Yell;
+  /** Where Dalton was when they yelled (where they want Mr. Gravy to go). */
+  seen: Point;
+}
+
+/** What's going on around the student this frame. */
+export interface StudentContext {
+  /** Word got around: see further and wider, notice Dalton even empty-handed, walk faster, chatter. */
+  highAlert: boolean;
+}
 
 /**
- * A student hanging around the halls. Ignores you unless you're carrying scrap or scrapping in
- * front of them; then they run and tell Mr. Gravy, who sprints to where you were seen.
+ * A student hanging around the halls and classrooms. See Dalton with scrap and they stop, point and
+ * yell for Mr. Gravy, then slowly follow him, yelling again while they can see him, until they lose
+ * him for a while. The decisions are in systems/studentMind.ts; this class walks, turns and talks.
  *
  *   idle (looks around) <-> walk (strolls somewhere nearby)
- *   sees you with scrap: notice (stares, suspicion fills) -> tattle (shouts, runs to Mr. Gravy)
- *     -> report (tells him) -> idle, ignoring you for a while
+ *   sees scrap: yell -> follow -> (loses him) idle, ignoring him for a while
+ *   high alert, sees him empty-handed: notice ('?') -> yell -> follow ...
  */
 export class Student {
   readonly zone: Phaser.GameObjects.Zone;
   readonly body: Phaser.Physics.Arcade.Body;
   readonly view: CharacterView;
-  private readonly mark: Phaser.GameObjects.Text;
+  readonly mind: StudentMind = newMind();
+  private readonly emote: Emote;
+  private readonly bubble: SpeechBubble;
   private readonly cone: Phaser.GameObjects.Graphics;
-  /** Sits on the student; holds the tail and the body, which slides sideways to stay on screen. */
-  private readonly bubble: Phaser.GameObjects.Container;
-  private readonly bubbleBody: Phaser.GameObjects.Container;
-  private readonly bubbleBg: Phaser.GameObjects.Graphics;
-  private readonly bubbleText: Phaser.GameObjects.Text;
-  private bubbleWidth = 0;
-  /** -1/1 leans the bubble left/right of its tail (away from Mr. Gravy's '!' while telling him); 0 centres it. */
-  private bubbleLean = 0;
 
-  state: StudentState = 'idle';
-  suspicion = 0;
   facing = Math.random() * Math.PI * 2;
-  /** Where the player was when this student caught them. */
-  reportPoint: Point | null = null;
+  /** Where Dalton was the last time this student saw him. */
+  lastSeen: Point | null = null;
+  /** What they do while calm. */
+  private calm: 'idle' | 'walk' = 'idle';
+  private highAlert = false;
   private path: Point[] = [];
+  /** Seconds of standing around left (idle). */
   private timer = Phaser.Math.FloatBetween(...BALANCE.students.pauseSeconds);
   private lookT = 0;
   private lookBase = this.facing;
-  private ignore = 0;
   private repathIn = 0;
-  private failedPaths = 0;
-  private tattleT = 0;
-  private bubbleLeft = 0;
+  /** Seconds until they next say something on high alert; null until it starts. */
+  private chatterIn: number | null = null;
   private stuckCheck = { x: 0, y: 0, t: 0 };
   /** The waypoint being walked to and where that leg started, to notice overshooting it. */
   private legTo: Point | null = null;
   private legFrom: Point = { x: 0, y: 0 };
   /** Tiles this student strolls between (see systems/wander.ts). */
   private readonly area: Point[];
-  private readonly range = BALANCE.students.visionRangeTiles * TILE;
-  private readonly halfAngle = Phaser.Math.DegToRad(BALANCE.students.visionHalfAngleDeg);
   private readonly walkSpeed: number;
-  private readonly runSpeed: number;
 
   constructor(
     scene: Phaser.Scene,
@@ -91,30 +94,13 @@ export class Student {
     this.body.setCollideWorldBounds(true);
 
     const looks = def.variants?.length ? def.variants : [def.sprite];
-    this.cone = scene.add.graphics().setDepth(7);
-    this.view = new CharacterView(scene, looks[index % looks.length], x, y, { scale: SCALE });
-    this.mark = scene.add
-      .text(x, y, '', { fontFamily: 'Arial Black, Arial', fontSize: '48px', color: '#ffa53d', stroke: '#14161c', strokeThickness: 7 })
-      .setOrigin(0.5, 1)
-      .setDepth(20);
-    this.bubbleBg = scene.add.graphics();
-    this.bubbleText = scene.add
-      .text(0, 0, '', textStyle(26, '#1b1d24', { strokeThickness: 0, align: 'center', wordWrap: { width: BUBBLE_WRAP } }))
-      .setOrigin(0.5);
-    this.bubbleBody = scene.add.container(0, 0, [this.bubbleBg, this.bubbleText]);
-    const tail = scene.add
-      .graphics()
-      .fillStyle(0xffffff, 1)
-      .fillTriangle(-9, -2, 9, -2, 0, 12)
-      .lineStyle(3, INK, 1)
-      .lineBetween(-9, 0, 0, 12)
-      .lineBetween(0, 12, 9, 0);
-    // Under the '?'/'!' marks, so a bubble never hides Mr. Gravy's state.
-    this.bubble = scene.add.container(x, y, [this.bubbleBody, tail]).setDepth(19).setVisible(false);
+    this.cone = scene.add.graphics().setDepth(DEPTH.cones);
+    // Kids are drawn shorter in the art itself, so no scaling (that would blur the pixels).
+    this.view = new CharacterView(scene, looks[index % looks.length], x, y);
+    this.emote = new Emote(scene);
+    this.bubble = new SpeechBubble(scene, BUBBLE_WRAP);
 
-    const speed = BALANCE.tilesPerSecond(def.speed) * TILE;
-    this.walkSpeed = speed * BALANCE.students.walkFactor;
-    this.runSpeed = speed * BALANCE.students.runFactor;
+    this.walkSpeed = BALANCE.tilesPerSecond(def.speed) * TILE * BALANCE.students.walkFactor;
 
     const hangouts = BALANCE.students.hangouts;
     const likes = (tx: number, ty: number) => {
@@ -134,158 +120,206 @@ export class Student {
     return this.body.position.y + RADIUS;
   }
 
-  get visionCone(): Cone {
-    return { origin: { x: this.x, y: this.y }, facing: this.facing, range: this.range, halfAngle: this.halfAngle };
+  get state(): StudentState {
+    return this.mind.attention === 'calm' ? this.calm : this.mind.attention;
   }
 
-  /** Runs the AI for one frame. Returns what happened, if the scene should react. */
-  update(dt: number, player: Player, boss: Boss): StudentEvent | null {
-    this.ignore = Math.max(0, this.ignore - dt);
-    if (this.bubbleLeft > 0 && (this.bubbleLeft -= dt) <= 0) this.bubble.setVisible(false);
+  /** The '?' meter (high alert only), 0-1. */
+  get suspicion(): number {
+    return this.mind.suspicion;
+  }
 
-    if (this.state === 'tattle') return this.runToBoss(dt, boss);
-    if (this.state === 'report') {
-      this.stop();
-      this.turnToward(Math.atan2(boss.y - this.y, boss.x - this.x), dt, 6);
-      if ((this.timer -= dt) <= 0) this.forget();
-      return null;
-    }
+  /** Seconds left of leaving Dalton alone. Settable for tests. */
+  get ignore(): number {
+    return this.mind.ignore;
+  }
+
+  set ignore(seconds: number) {
+    this.mind.ignore = seconds;
+  }
+
+  /** How much they light up the HUD's danger edge (0-1). */
+  get danger(): number {
+    return mindDanger(this.mind, BALANCE.students.danger);
+  }
+
+  get visionCone(): Cone {
+    const s = BALANCE.students;
+    const range = s.visionRangeTiles * (this.highAlert ? s.highAlertRangeFactor : 1) * TILE;
+    const half = s.visionHalfAngleDeg + (this.highAlert ? s.highAlertExtraHalfAngleDeg : 0);
+    return { origin: { x: this.x, y: this.y }, facing: this.facing, range, halfAngle: Phaser.Math.DegToRad(half) };
+  }
+
+  /** Runs the AI for one frame. Returns a yell for the scene to deal with, if they just yelled. */
+  update(dt: number, player: Player, ctx: StudentContext): StudentYell | null {
+    this.highAlert = ctx.highAlert;
+    this.bubble.update(dt);
 
     const target = { x: player.x, y: player.y };
-    if (this.ignore <= 0 && player.suspicious && inCone(this.world.sight, this.visionCone, target)) {
-      const { noticeSecondsNear: near, noticeSecondsFar: far } = BALANCE.students;
-      const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
-      this.suspicion = Math.min(1, this.suspicion + dt / (near + (far - near) * Math.min(1, dist / this.range)));
-      this.state = 'notice';
-      this.stop();
-      this.turnToward(Math.atan2(target.y - this.y, target.x - this.x), dt, 6);
-      if (this.suspicion >= 1) {
-        this.startTattle(target);
-        return 'saw';
-      }
-      return null;
+    const cone = this.visionCone;
+    const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
+    const sees = !player.blendsIn && inCone(this.world.sight, cone, target);
+    const was = this.mind.attention;
+    const why = think(this.mind, { sees, redHanded: player.suspicious, highAlert: ctx.highAlert, distance: dist / cone.range }, dt, TUNING);
+    if (sees && this.mind.attention !== 'calm') this.lastSeen = target;
+    if (was !== this.mind.attention) {
+      if (this.mind.attention === 'calm') this.rest();
+      else if (was === 'calm') this.path = [];
     }
 
-    this.suspicion = Math.max(0, this.suspicion - BALANCE.students.suspicionDecay * dt);
-    switch (this.state) {
+    if (why) {
+      this.stop();
+      this.bubble.say(pick(STUDENT_LINES[why]), BALANCE.students.yellSeconds + YELL_BUBBLE_EXTRA, 'shout');
+      return { why, seen: { ...target } };
+    }
+
+    switch (this.mind.attention) {
+      case 'yell':
+        this.stop();
+        this.turnToward(this.angleTo(sees ? target : this.lastSeen), dt, 10);
+        break;
+      case 'follow':
+        this.followPlayer(dt, sees, dist, target);
+        break;
       case 'notice':
-        // Keeps staring at where you were until they lose interest.
+        // Stares at him (or where he was) until they make up their mind or lose interest.
         this.stop();
-        if (this.suspicion <= 0) this.rest();
+        if (sees) this.turnToward(this.angleTo(target), dt, 6);
         break;
-      case 'walk':
-        if (this.follow(dt, this.walkSpeed)) this.rest();
-        break;
-      case 'idle':
-        this.stop();
-        this.timer -= dt;
-        this.lookT += dt;
-        this.facing = this.lookBase + Math.sin(this.lookT * 1.8) * 0.8;
-        if (this.timer <= 0) this.wander();
+      case 'calm':
+        this.hangOut(dt);
         break;
     }
+    this.tickChatter(dt);
     return null;
+  }
+
+  /** Mr. Gravy caught Dalton: whoever was after him has nothing left to yell about. */
+  calmDown(): void {
+    const wasAfterHim = this.mind.attention === 'yell' || this.mind.attention === 'follow';
+    if (this.mind.attention === 'calm') return;
+    calmDown(this.mind, BALANCE.students.ignoreSeconds);
+    this.rest();
+    if (wasAfterHim) this.bubble.say(pick(STUDENT_LINES.busted), 1.6);
+  }
+
+  /** Word got around: say something about it in `delay` seconds (if they're just hanging out then). */
+  queueChatter(delay: number): void {
+    this.chatterIn = delay;
+  }
+
+  /** Shows a speech bubble (for the scene and tests). */
+  say(text: string, seconds: number): void {
+    this.bubble.say(text, seconds);
+  }
+
+  get saying(): boolean {
+    return this.bubble.visible;
   }
 
   syncView(time: number, view: Phaser.Geom.Rectangle): void {
-    this.view.update(this.x, this.y, this.facing, this.body.speed > 5, time, { running: this.state === 'tattle' });
+    const attention = this.mind.attention;
+    this.view.update(this.x, this.y, this.facing, this.body.speed > 5, time, {
+      pose: attention === 'yell' ? 'yell' : undefined,
+    });
 
-    const telling = this.state === 'tattle' || this.state === 'report';
-    const noticing = this.state === 'notice';
-    this.mark.setText(this.bubble.visible ? '' : telling ? '!' : noticing ? '?' : '');
     const head = this.y + this.view.headTop;
-    this.mark.setPosition(this.x, head + 2 + Math.sin(time / 110) * 4);
-    this.bubble.setPosition(this.x, head - 12);
-    if (this.bubble.visible) {
-      // Slide the body sideways to keep it on screen (phones zoom in a lot), but never off its tail.
-      const half = this.bubbleWidth / 2;
-      const slack = half - 22;
-      const onScreen = Phaser.Math.Clamp(this.x + this.bubbleLean * slack, view.x + half + 8, view.right - half - 8);
-      this.bubbleBody.x = Phaser.Math.Clamp(onScreen - this.x, -slack, slack);
-    }
+    // The bubble says it all; otherwise '!' while after him (following, he's in sight), '?' while unsure.
+    const lost = attention === 'follow' && this.mind.lostFor > 0;
+    const mark = this.bubble.visible ? null : attention === 'yell' || (attention === 'follow' && !lost) ? '!' : attention === 'notice' || lost ? '?' : null;
+    this.emote.show(mark, time);
+    this.emote.place(this.x, head - 4, time);
+    this.bubble.place(this.x, head - 4, view);
 
     this.cone.clear();
     // Cones are only worth drawing when they can be on screen.
-    const r = this.range;
-    const onScreen = this.x + r >= view.x && this.x - r <= view.right && this.y + r >= view.y && this.y - r <= view.bottom;
-    if (telling || !onScreen) return;
+    const cone = this.visionCone;
+    const r = cone.range;
+    if (this.x + r < view.x || this.x - r > view.right || this.y + r < view.y || this.y - r > view.bottom) return;
     // Graphics only reads x/y from the points.
-    const poly = conePolygon(this.world.sight, this.visionCone, 18) as Phaser.Math.Vector2[];
-    const color = noticing ? 0xffa53d : 0x9fd8ff;
-    const alpha = this.ignore > 0 ? 0.05 : noticing ? 0.24 : 0.12;
+    const poly = conePolygon(this.world.sight, cone, 20) as Phaser.Math.Vector2[];
+    const after = attention === 'yell' || attention === 'follow';
+    const color = after ? 0xff6a5a : attention === 'notice' ? 0xffa53d : this.highAlert ? 0xffd06a : 0x9fd8ff;
+    // Soft, so the floor art shows through; brighter once they're onto him.
+    const alpha = this.mind.ignore > 0 && !after ? 0.04 : after || attention === 'notice' ? 0.16 : 0.1;
     this.cone.fillStyle(color, alpha).fillPoints(poly, true);
-    this.cone.lineStyle(2, color, alpha * 1.8).strokePoints(poly, true);
+    this.cone.lineStyle(2, color, Math.min(0.5, alpha * 2.2)).strokePoints(poly, true);
   }
 
-  private startTattle(seen: Point) {
-    this.reportPoint = { ...seen };
-    this.suspicion = 0;
-    this.state = 'tattle';
-    this.tattleT = 0;
-    this.timer = BALANCE.students.shoutSeconds;
-    this.failedPaths = 0;
-    this.repathIn = 0;
-    this.path = [];
-    this.stop();
-    this.say('MR. GRAVY!!', 1.4);
+  destroy(): void {
+    this.view.destroy();
+    this.emote.destroy();
+    this.bubble.destroy();
+    this.cone.destroy();
+    this.zone.destroy();
   }
 
-  private runToBoss(dt: number, boss: Boss): StudentEvent | null {
-    this.tattleT += dt;
-    if (this.timer > 0) {
-      this.timer -= dt;
-      return null;
+  // ---- following ---------------------------------------------------------
+
+  /** Slowly walks to where they last saw him, stopping a little way off while he's in sight. */
+  private followPlayer(dt: number, sees: boolean, dist: number, target: Point) {
+    if (followHolds(sees, dist, BALANCE.students.followKeepTiles * TILE)) {
+      this.stop();
+      this.path = [];
+      this.turnToward(this.angleTo(target), dt, 8);
+      return;
     }
-    const at = { x: boss.x, y: boss.y };
-    if (Phaser.Math.Distance.Between(this.x, this.y, at.x, at.y) < BALANCE.students.reportRangeTiles * TILE) {
-      return this.report(boss);
+    const goal = this.lastSeen;
+    if (!goal) {
+      this.stop();
+      return;
     }
-    if (this.tattleT > BALANCE.students.giveUpSeconds) {
-      this.forget();
-      return null;
-    }
-    if (clearLine(this.world.nav, this, at, RADIUS)) {
-      this.path = [at];
-      // Re-plan as soon as he goes out of sight.
+    if (clearLine(this.world.nav, this, goal, RADIUS)) {
+      this.path = [goal];
+      // Re-plan as soon as the straight line is blocked.
       this.repathIn = 0;
     } else if ((this.repathIn -= dt) <= 0) {
       this.repathIn = REPATH_SECONDS;
-      if (this.goTo(at)) this.failedPaths = 0;
-      else if (++this.failedPaths >= MAX_FAILED_PATHS) {
-        this.forget();
-        return null;
-      }
+      this.goTo(goal);
     }
-    this.follow(dt, this.runSpeed);
-    return null;
+    if (this.follow(dt, this.walkSpeed * BALANCE.students.followFactor)) {
+      // Got there and he's gone: look around for him.
+      this.lookT += dt;
+      this.facing += Math.sin(this.lookT * 2.2) * dt * 2.5;
+    }
   }
 
-  private report(boss: Boss): StudentEvent | null {
+  // ---- hanging out -------------------------------------------------------
+
+  private hangOut(dt: number) {
+    const s = BALANCE.students;
+    if (this.calm === 'walk') {
+      if (this.follow(dt, this.walkSpeed * (this.highAlert ? s.highAlertWalkFactor : 1))) this.rest();
+      return;
+    }
     this.stop();
-    this.path = [];
-    this.state = 'report';
-    this.timer = BALANCE.students.reportPauseSeconds;
-    this.say(Phaser.Utils.Array.GetRandom(REPORT_LINES), BALANCE.students.reportPauseSeconds + 0.4, Math.sign(this.x - boss.x));
-    return this.reportPoint && boss.respondTo(this.reportPoint, this.tattleT) ? 'reported' : null;
+    this.timer -= dt;
+    // On high alert they look around wider and quicker.
+    const look = this.highAlert ? s.highAlertLookFactor : 1;
+    this.lookT += dt * look;
+    this.facing = this.lookBase + Math.sin(this.lookT * 1.8) * 0.8 * Math.min(1.5, look);
+    if (this.timer <= 0) this.wander();
   }
 
-  /** Mr. Gravy just caught the player, so whoever was running to tell him has nothing left to tell. */
-  cancelReport(): void {
-    if (this.state === 'tattle') this.forget();
+  private tickChatter(dt: number) {
+    if (!this.highAlert) {
+      this.chatterIn = null;
+      return;
+    }
+    const every = BALANCE.students.chatterEverySeconds;
+    if (this.chatterIn === null) this.chatterIn = Phaser.Math.FloatBetween(...every);
+    if ((this.chatterIn -= dt) > 0) return;
+    this.chatterIn = Phaser.Math.FloatBetween(...every);
+    if (this.mind.attention === 'calm' && !this.bubble.visible) this.bubble.say(pick(STUDENT_LINES.chatter), CHATTER_SECONDS);
   }
 
-  /** Done telling (or gave up): back to hanging out, and leave the player alone for a while. */
-  private forget() {
-    this.reportPoint = null;
-    this.ignore = BALANCE.students.ignoreSeconds;
-    this.rest();
-  }
-
+  /** Stands around for a bit before the next stroll. */
   private rest() {
-    this.state = 'idle';
+    const s = BALANCE.students;
+    this.calm = 'idle';
     this.path = [];
     this.stop();
-    this.timer = Phaser.Math.FloatBetween(...BALANCE.students.pauseSeconds);
+    this.timer = Phaser.Math.FloatBetween(...s.pauseSeconds) * (this.highAlert ? s.highAlertPauseFactor : 1);
     this.lookBase = this.facing;
     this.lookT = 0;
   }
@@ -297,25 +331,10 @@ export class Student {
       this.rest();
       return;
     }
-    this.state = 'walk';
+    this.calm = 'walk';
   }
 
-  private say(text: string, seconds: number, lean = 0) {
-    this.bubbleLean = lean;
-    this.bubbleText.setText(text);
-    const w = this.bubbleText.width + 26;
-    const h = this.bubbleText.height + 14;
-    this.bubbleWidth = w;
-    this.bubbleText.setPosition(0, -h / 2);
-    this.bubbleBg
-      .clear()
-      .fillStyle(0xffffff, 1)
-      .fillRoundedRect(-w / 2, -h, w, h, 12)
-      .lineStyle(3, INK, 1)
-      .strokeRoundedRect(-w / 2, -h, w, h, 12);
-    this.bubble.setVisible(true);
-    this.bubbleLeft = seconds;
-  }
+  // ---- walking -----------------------------------------------------------
 
   /** Returns false when there is no way there. */
   private goTo(p: Point): boolean {
@@ -376,6 +395,10 @@ export class Student {
 
   private stop() {
     this.body.setVelocity(0, 0);
+  }
+
+  private angleTo(p: Point | null): number {
+    return p ? Math.atan2(p.y - this.y, p.x - this.x) : this.facing;
   }
 
   private turnToward(angle: number, dt: number, rate: number) {

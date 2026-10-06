@@ -96,17 +96,36 @@ export const sfx = {
     tone(300, 0, 0.25, 'sawtooth', 0.25);
     tone(300, 0.3, 0.35, 'sawtooth', 0.25);
   },
-  /** A student gasps and yells for Mr. Gravy. */
-  tattle: () => {
+  /** A student points and yells for Mr. Gravy: a gasp, then a two-note "MIS-TER GRA-VY!". */
+  yell: () => {
     tone(880, 0, 0.1, 'triangle', 0.22, 1320);
     tone(1175, 0.13, 0.12, 'square', 0.14);
     tone(988, 0.27, 0.2, 'square', 0.14);
+    noise(0.13, 0.25, 0.05, 2500);
   },
-  /** Mr. Gravy hears the report and takes off. */
+  /** Mr. Gravy hears a yell and takes off. */
   report: () => {
     tone(392, 0, 0.09, 'sawtooth', 0.18);
     tone(523, 0.09, 0.09, 'sawtooth', 0.18);
     tone(784, 0.18, 0.18, 'sawtooth', 0.18, 1046);
+  },
+  /** Word gets around: every student is on high alert. */
+  alert: () => [659, 523, 659, 523].forEach((f, i) => tone(f, i * 0.14, 0.12, 'square', 0.13)),
+  /** High alert is over. */
+  calm: () => {
+    tone(523, 0, 0.14, 'triangle', 0.16);
+    tone(392, 0.14, 0.24, 'triangle', 0.16);
+  },
+  /** The sleepy coworker jolts awake. */
+  jolt: () => {
+    tone(300, 0, 0.12, 'triangle', 0.2, 900);
+    tone(1200, 0.1, 0.08, 'square', 0.12);
+  },
+  /** Getting paid off: a coin "cha-ching". */
+  coin: () => {
+    tone(988, 0, 0.07, 'square', 0.16);
+    tone(1319, 0.07, 0.07, 'square', 0.16);
+    tone(1976, 0.14, 0.26, 'square', 0.14);
   },
   coffee: () => tone(500, 0, 0.4, 'triangle', 0.2, 250),
   fired: () => [523, 415, 330, 262].forEach((f, i) => tone(f, i * 0.18, 0.22, 'sawtooth', 0.22)),

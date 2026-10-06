@@ -65,6 +65,11 @@ export class Player {
     return this.ability?.id === 'look_busy' && this.abilityLeft > 0;
   }
 
+  /** Dressed as a student: other students don't give him a second look, even on high alert. */
+  get blendsIn(): boolean {
+    return this.disguised;
+  }
+
   /** Board: the boss "only sees PC if they are carrying scrap" — or caught in the act of scrapping. */
   get suspicious(): boolean {
     if (this.isScrapping) return !this.lookingBusy;

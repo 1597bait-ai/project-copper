@@ -8,8 +8,8 @@ import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
 import { MATERIALS } from '../config/materials';
 import { NPCS } from '../config/npcs';
-// @ts-expect-error -- plain JS module shared with the art tool
-import { TILES as ART_TILES } from '../../tools/tiles.mjs';
+import { hasTileArt, paintTileFrame } from '../art/tiles';
+import { TILE_FRAMES, iconFrame } from './autotile';
 import { DECOR_CHARS, FIXTURE_CHARS, TILES } from './legend';
 import { parseMap, serializeMap } from './mapText';
 import { MAPS } from './maps';
@@ -34,8 +34,15 @@ describe('content', () => {
     for (const id of Object.keys(DECOR)) expect(decor.has(id), `map character for ${id}`).toBe(true);
   });
 
-  it('the tile legend matches the tileset art, in order', () => {
-    expect((ART_TILES as { char: string }[]).map((t) => t.char)).toEqual(TILES.map((t) => t.char));
+  it('the generated tileset draws every tile in the legend', () => {
+    for (const t of TILES) {
+      expect(hasTileArt(t.char), `art for "${t.char}" (${t.name}) in src/art/tiles.ts`).toBe(true);
+      const frames = TILE_FRAMES.filter((f) => f.char === t.char);
+      const parts = new Set(frames.map((f) => (f.kind === 'wall' ? f.part : 'floor')));
+      expect([...parts].sort(), `frames for "${t.char}"`).toEqual(t.layer === 'walls' ? ['face', 'top'] : ['floor']);
+      expect(iconFrame(t.char), `palette icon for "${t.char}"`).toBeGreaterThanOrEqual(0);
+      for (const f of frames) expect(paintTileFrame(f).empty, `frame of "${t.char}" is blank`).toBe(false);
+    }
   });
 });
 

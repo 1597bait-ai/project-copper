@@ -1,10 +1,10 @@
-// Rasterizes the SVG tileset to the PNG that Tiled and the game use, plus the app icons.
+// Renders the app icons (public/icon.svg -> icon-192.png and icon-512.png).
 //   npm run art
+// The game's own art (tileset, sprites) is drawn in code at boot (src/art/), so it needs no files.
 // Uses Playwright's Chromium (npx playwright install chromium if you don't have it).
 
 import { chromium } from 'playwright';
 import { readFile } from 'node:fs/promises';
-import { tilesetSvg } from './tiles.mjs';
 
 async function render(page, svg, out) {
   await page.setContent(`<!doctype html><html><body style="margin:0;background:transparent">${svg}</body></html>`);
@@ -15,8 +15,6 @@ async function render(page, svg, out) {
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 1 });
-
-await render(page, tilesetSvg(), new URL('../src/assets/tiles/school-tiles.png', import.meta.url).pathname);
 
 const icon = await readFile(new URL('../public/icon.svg', import.meta.url), 'utf8');
 for (const size of [192, 512]) {

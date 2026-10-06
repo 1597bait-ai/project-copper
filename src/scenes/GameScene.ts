@@ -2,17 +2,21 @@ import Phaser from 'phaser';
 import { BALANCE, TILE } from '../config/balance';
 import { CHARACTERS, type CharacterDef } from '../config/characters';
 import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
-import { NPCS } from '../config/npcs';
+import { COWORKER_LINES, GRAVY_LINES, NPCS } from '../config/npcs';
 import { Boss } from '../entities/Boss';
 import type { Door } from '../entities/Door';
 import type { Fixture } from '../entities/Fixture';
 import { Player } from '../entities/Player';
-import { Student, type StudentEvent } from '../entities/Student';
+import { SleepyCoworker, type CoworkerEvent } from '../entities/SleepyCoworker';
+import { Student, type StudentYell } from '../entities/Student';
 import { controls } from '../input/Controls';
+import { AlertTimer } from '../systems/alert';
 import { mergeContents, roundMoney, saleValue, type ScrapContents } from '../systems/Bag';
 import { clockText } from '../systems/clock';
+import { besideDesk, coworkerLine, coworkerWakes } from '../systems/coworker';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
 import { sfx } from '../systems/sfx';
+import { chatterDelays, hearsYell } from '../systems/studentMind';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { parseMap } from '../world/mapText';
 import { DEFAULT_MAP } from '../world/maps';
@@ -94,8 +98,19 @@ export class GameScene extends Phaser.Scene {
   private over = false;
   private ending = false;
   private wasChasing = false;
-  /** Shift time each kind of student toast last showed, so a crowd of tattlers doesn't spam. */
-  private studentToastAt: Partial<Record<StudentEvent, number>> = {};
+  /** Word got around after a student's yell reached Mr. Gravy: every student is on high alert. */
+  readonly alert = new AlertTimer();
+  /** The sleepy coworker while he's around (one at a time). */
+  coworker: SleepyCoworker | null = null;
+  /**
+   * Chance he's under a desk you finish scrapping (from BALANCE each shift). Tests set it to 1;
+   * wakeSleepyCoworker() skips the roll altogether.
+   */
+  coworkerChance: number = BALANCE.sleepyCoworker.chance;
+  private coworkersMet = 0;
+  private hushMoney = 0;
+  /** Shift time each kind of toast last showed, so a crowd of yelling students doesn't spam. */
+  private toastAt: Record<string, number> = {};
   private channelBar!: Phaser.GameObjects.Graphics;
   private keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private padPrev = { a: false, x: false, b: false, start: false };
@@ -123,7 +138,12 @@ export class GameScene extends Phaser.Scene {
     this.ending = false;
     this.wasChasing = false;
     this.students = [];
-    this.studentToastAt = {};
+    this.toastAt = {};
+    this.alert.stop();
+    this.coworker = null;
+    this.coworkerChance = BALANCE.sleepyCoworker.chance;
+    this.coworkersMet = 0;
+    this.hushMoney = 0;
     controls.reset();
   }
 
@@ -247,7 +267,14 @@ export class GameScene extends Phaser.Scene {
     this.wasChasing = chasing;
 
     // Once fired, nobody walks off during the "you're fired" beat.
-    if (!this.over) this.updateStudents(dt);
+    if (!this.over) {
+      if (this.alert.tick(dt)) {
+        sfx.calm();
+        this.toast('The students calmed down. High alert is over.', '#9fd8ff');
+      }
+      this.updateStudents(dt);
+      this.updateCoworker(dt);
+    }
 
     for (const f of this.world.fixtures) f.update(dt);
     this.refreshHud();
@@ -316,12 +343,13 @@ export class GameScene extends Phaser.Scene {
     const taken = p.bag.takeAll();
     mergeContents(this.lost, taken);
     this.boss.afterCatch();
-    for (const s of this.students) s.cancelReport();
+    // Nothing left to yell about.
+    for (const s of this.students) s.calmDown();
     sfx.warning();
     this.cameras.main.shake(250, 0.008);
     this.cameras.main.flash(200, 255, 60, 40);
-    const lines = ['HEY! That\'s school property!', 'What do you think you\'re doing?!', 'My office. NOW. ...Actually, get back to work.'];
-    this.floatText(this.boss.x, this.boss.y - 60, lines[Math.min(this.warnings, lines.length) - 1], '#ff8a7a', 2200);
+    const lines = GRAVY_LINES.caught;
+    this.boss.say(lines[Math.min(this.warnings, lines.length) - 1], 2.4);
     if (this.warnings >= BALANCE.warningsUntilFired) {
       this.toast("THREE WARNINGS — YOU'RE FIRED!", '#ff5a4f', 2500);
       this.over = true;
@@ -350,7 +378,7 @@ export class GameScene extends Phaser.Scene {
       lost: this.lost,
       warnings: this.warnings,
       character: this.characterId,
-      hushMoney: 0,
+      hushMoney: this.hushMoney,
       mapText: this.mapText,
     };
     this.cameras.main.fadeOut(500, 20, 22, 28);
@@ -365,22 +393,122 @@ export class GameScene extends Phaser.Scene {
     for (const a of [this.player, this.boss, ...this.students]) a.body.setVelocity(0, 0);
   }
 
+  // ---- students ----------------------------------------------------------
+
   private updateStudents(dt: number) {
+    const ctx = { highAlert: this.alert.active };
     for (const s of this.students) {
-      const event = s.update(dt, this.player, this.boss);
-      if (event) this.onStudent(event);
+      const yell = s.update(dt, this.player, ctx);
+      if (yell) this.onYell(s, yell);
     }
   }
 
-  private onStudent(event: StudentEvent) {
-    const last = this.studentToastAt[event];
-    if (event === 'saw') sfx.tattle();
-    else sfx.report();
+  /**
+   * A student yelled for Mr. Gravy. If he's close enough to hear it, he sprints to where they saw
+   * Dalton (every yell he hears moves him to the newest spot), and that counts as a report: word
+   * gets around and every student goes on high alert.
+   */
+  private onYell(s: Student, yell: StudentYell) {
+    sfx.yell();
+    const boss = this.boss;
+    if (!hearsYell(s, boss, BALANCE.students.yellHearingTiles * TILE)) {
+      this.throttledToast('unheard', 'A student is yelling for Mr. Gravy!', '#ffc23d');
+      return;
+    }
+    const wasResponding = boss.state === 'respond';
+    if (boss.respondTo(yell.seen) && !wasResponding) {
+      sfx.report();
+      boss.say(GRAVY_LINES.heard[Math.floor(Math.random() * GRAVY_LINES.heard.length)], 1.4);
+      // Short enough for one line on a portrait phone: the HUD stacks toasts one line apart.
+      this.throttledToast('heard', `${NPCS.mr_gravy.name} heard! He's on his way!`, '#ff8a5a');
+    }
+    this.raiseAlarm(s);
+  }
+
+  /**
+   * Starts (or restarts) the high alert. When it's news, the students start talking about it, the
+   * ones nearest `from` (where the yell came from) first. Public so tests can set it off.
+   */
+  raiseAlarm(from: { x: number; y: number } = this.player): void {
+    const s = BALANCE.students;
+    if (!this.alert.start(s.highAlertSeconds)) return;
+    sfx.alert();
+    this.toast('Word got around: the students are on HIGH ALERT!', '#ff8a5a', 3400);
+    const dist = this.students.map((st) => Phaser.Math.Distance.Between(st.x, st.y, from.x, from.y));
+    const delays = chatterDelays(dist, s.chatterGapSeconds, s.chatterJitterSeconds, Math.random);
+    // A short beat first, so the yell itself is heard before the chatter.
+    this.students.forEach((st, i) => st.queueChatter(0.8 + delays[i]));
+  }
+
+  /** A toast that shows at most once every few seconds per `kind`. */
+  private throttledToast(kind: string, text: string, color: string) {
+    const last = this.toastAt[kind];
     if (last !== undefined && this.elapsed - last < BALANCE.students.toastCooldownSeconds) return;
-    this.studentToastAt[event] = this.elapsed;
-    // Short enough for one line on a portrait phone: the HUD stacks toasts one line apart.
-    if (event === 'saw') this.toast('A student is telling on you!', '#ffc23d');
-    else this.toast(`${NPCS.mr_gravy.name} is sprinting over!`, '#ff8a5a');
+    this.toastAt[kind] = this.elapsed;
+    this.toast(text, color);
+  }
+
+  // ---- the sleepy coworker -----------------------------------------------
+
+  /** Dalton just finished scrapping `f`: if it's a desk, maybe the coworker was napping under it. */
+  private maybeWakeCoworker(f: Fixture) {
+    const c = BALANCE.sleepyCoworker;
+    if (!c.napsUnder.includes(f.def.id) || this.coworker) return;
+    if (coworkerWakes(this.coworkerChance, this.coworkersMet, c.maxPerShift, Math.random())) this.wakeSleepyCoworker(f);
+  }
+
+  /**
+   * The coworker crawls out from under `desk` (default: the desk nearest Dalton), whatever the
+   * odds or how often he's turned up. Returns false if he's already around or there's no room.
+   * Public for tests and debugging: `game.scene.getScene('Game').wakeSleepyCoworker()`.
+   */
+  wakeSleepyCoworker(desk?: Fixture): boolean {
+    if (this.coworker || this.over) return false;
+    const p = this.player;
+    const naps = BALANCE.sleepyCoworker.napsUnder;
+    const near = (f: Fixture) => Phaser.Math.Distance.Between(p.x, p.y, f.x, f.y);
+    const target = desk ?? this.world.fixtures.filter((f) => naps.includes(f.def.id)).sort((a, b) => near(a) - near(b))[0];
+    if (!target) return false;
+    const nav = this.world.nav;
+    const d = nav.toTile(target.x, target.y);
+    const me = nav.toTile(p.x, p.y);
+    const tile = besideDesk(nav, { x: d.tx, y: d.ty }, { x: me.tx, y: me.ty });
+    if (!tile) return false;
+    this.coworkersMet++;
+    this.coworker = new SleepyCoworker(this, this.world, { x: target.x, y: target.y }, nav.center(tile.x, tile.y));
+    return true;
+  }
+
+  private updateCoworker(dt: number) {
+    const c = this.coworker;
+    if (!c) return;
+    const event = c.update(dt, this.player);
+    if (event) this.onCoworker(c, event);
+  }
+
+  private onCoworker(c: SleepyCoworker, event: CoworkerEvent) {
+    const b = BALANCE.sleepyCoworker;
+    const say = (text: string, seconds: number) =>
+      this.dialog({ speaker: NPCS.sleepy_coworker.name, text, seconds, portrait: `${NPCS.sleepy_coworker.sprite}_big` });
+    switch (event) {
+      case 'jolt':
+        sfx.jolt();
+        break;
+      case 'excuse':
+        say(COWORKER_LINES.wake, b.lineSeconds[0]);
+        break;
+      case 'bribe':
+        say(coworkerLine(COWORKER_LINES.bribe, b.hushMoney), b.lineSeconds[1]);
+        this.earned = roundMoney(this.earned + b.hushMoney);
+        this.hushMoney = roundMoney(this.hushMoney + b.hushMoney);
+        sfx.coin();
+        this.floatText(c.x, c.y - 70, coworkerLine('+{money}', b.hushMoney), '#7ddc7d', 1600);
+        break;
+      case 'gone':
+        c.destroy();
+        this.coworker = null;
+        break;
+    }
   }
 
   /**
@@ -494,6 +622,7 @@ export class GameScene extends Phaser.Scene {
         const color = Phaser.Display.Color.IntegerToColor(MATERIALS[f.def.material].color).rgba;
         const left = amount - added > 0.001 ? ` (bag full, left ${(amount - added).toFixed(2)})` : '';
         this.floatText(f.x, f.y - 30, `+${added.toFixed(2)} ${f.materialName.toLowerCase()}${left}`, color);
+        this.maybeWakeCoworker(f);
       },
     });
   }
@@ -517,10 +646,11 @@ export class GameScene extends Phaser.Scene {
   private syncViews() {
     if (!this.player) return;
     const time = this.time.now;
-    this.player.syncView(time);
-    this.boss.syncView(time);
     const view = this.cameras.main.worldView;
+    this.player.syncView(time);
+    this.boss.syncView(time, view);
     for (const s of this.students) s.syncView(time, view);
+    this.coworker?.syncView(time);
 
     const g = this.channelBar;
     g.clear();
@@ -582,8 +712,10 @@ export class GameScene extends Phaser.Scene {
     h.clock = clockText(h.progress);
     h.location = this.world.roomAt(p.x, p.y);
     const bossDanger = this.boss.state === 'chase' ? Math.max(0.6, this.boss.suspicion) : this.boss.suspicion;
-    const studentDanger = Math.max(0, ...this.students.map((s) => s.suspicion)) * BALANCE.students.dangerWeight;
+    // Yelling and following students count too (and a '?' on high alert).
+    const studentDanger = Math.max(0, ...this.students.map((s) => s.danger));
     h.danger = Math.max(bossDanger, studentDanger);
+    h.alert = this.alert.hud();
     h.ability = p.ability
       ? {
           name: p.ability.name,

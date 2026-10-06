@@ -1,6 +1,18 @@
 import Phaser from 'phaser';
 import { BALANCE } from '../config/balance';
 import type { Grid } from '../systems/Grid';
+import { DEPTH } from '../ui/depth';
+
+/**
+ * The texture for a doorway: seen from the front in a wall running across the screen, from
+ * above in one running up and down; a single door for a 1-tile doorway, double doors otherwise
+ * (stretched to fit doorways longer than 2 tiles).
+ */
+export function doorKey(rect: { width: number; height: number }, locked: boolean, tileSize: number): string {
+  const vertical = rect.height > rect.width;
+  const single = Math.max(rect.width, rect.height) <= tileSize;
+  return `door_${locked ? 'locked' : 'open'}${vertical ? '_v' : ''}${single ? (vertical ? '1' : '_1') : ''}`;
+}
 
 /** A door that blocks movement and sight until it is unlocked. Once open it stays open for the shift. */
 export class Door {
@@ -17,12 +29,10 @@ export class Door {
     readonly unlockSeconds: number = BALANCE.doors.unlockSeconds,
   ) {
     this.locked = locked;
-    const vertical = rect.height > rect.width;
     this.sprite = scene.add
-      .image(rect.centerX, rect.centerY, locked ? 'door_locked' : 'door_open')
-      .setRotation(vertical ? Math.PI / 2 : 0)
-      .setDisplaySize(Math.max(rect.width, rect.height), Math.min(rect.width, rect.height))
-      .setDepth(3);
+      .image(rect.centerX, rect.centerY, doorKey(rect, locked, grids[0].tileSize))
+      .setDisplaySize(rect.width, rect.height)
+      .setDepth(DEPTH.doors);
     this.blocker = scene.add.zone(rect.centerX, rect.centerY, rect.width, rect.height);
     solids.add(this.blocker);
     this.setBlocked(locked);
@@ -38,7 +48,7 @@ export class Door {
 
   unlock(): void {
     this.locked = false;
-    this.sprite.setTexture('door_open');
+    this.sprite.setTexture(doorKey(this.rect, false, this.grids[0].tileSize)).setDisplaySize(this.rect.width, this.rect.height);
     this.setBlocked(false);
   }
 

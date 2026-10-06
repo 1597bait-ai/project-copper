@@ -73,19 +73,27 @@ export const BALANCE = {
     respondSearchSeconds: 3,
   },
 
-  /** Students (board: Speed 1, Awareness 1) who run and tell Mr. Gravy when they catch you scrapping. */
+  /**
+   * Students (board: Speed 1, Awareness 1). See you with scrap and they yell for Mr. Gravy on the
+   * spot, then slowly follow you, yelling again while they can see you. Once one gets through to
+   * him, word spreads and every student is on high alert for a while.
+   */
   students: {
     /** Strolling speed as a fraction of their Speed-stat pace (Speed 1 = 2.0 tiles/s -> 1.2). */
     walkFactor: 0.6,
-    /** Running-to-tell speed as a fraction of their pace: 3.0 tiles/s, a little slower than Dalton's 3.2. */
-    runFactor: 1.5,
-    /** How far a student's vision cone reaches (tiles). Shorter than Mr. Gravy's 5. */
-    visionRangeTiles: 3.5,
-    /** Half-angle of a student's vision cone (degrees), so a 70° cone. */
-    visionHalfAngleDeg: 35,
-    /** Seconds of watching you before they go and tell, close up -> at the edge of the cone. */
-    noticeSecondsNear: 1,
-    noticeSecondsFar: 2.2,
+    /** Following you after spotting you, as a fraction of their strolling speed (-> 0.6 tiles/s): easy to outwalk, hard to ignore. */
+    followFactor: 0.5,
+    /** How far a student's vision cone reaches (tiles). A bit further than Mr. Gravy's 5. */
+    visionRangeTiles: 5.5,
+    /** Half-angle of a student's vision cone (degrees), so an 80° cone. */
+    visionHalfAngleDeg: 40,
+    /**
+     * Holding scrap or scrapping in front of them gets you yelled at instantly. Empty-handed you
+     * only look suspicious on high alert: seconds of staring before they yell, close up -> at the
+     * edge of the cone.
+     */
+    noticeSecondsNear: 1.2,
+    noticeSecondsFar: 3,
     /** Suspicion lost per second while they can't see you. */
     suspicionDecay: 0.5,
     /** Students stroll to spots up to this many tiles from where they start. */
@@ -94,19 +102,72 @@ export const BALANCE = {
     hangouts: ['hallway', 'classroom', 'lobby', 'restroom', 'lounge'] as RoomKind[],
     /** Seconds they stand and look around between strolls. */
     pauseSeconds: [1, 3] as [number, number],
-    /** Seconds they stand and shout before running off to tell. */
-    shoutSeconds: 0.4,
-    /** How close (tiles) they need to get to Mr. Gravy to tell him. */
-    reportRangeTiles: 1.4,
-    /** Seconds they stand there telling him. */
-    reportPauseSeconds: 1.5,
-    /** Seconds after telling (or giving up) that they ignore you. */
+
+    /** Seconds a yell lasts: they stand still, point at you and shout. */
+    yellSeconds: 1.3,
+    /** Mr. Gravy hears a yell from up to this many tiles away (straight line, walls don't muffle it). */
+    yellHearingTiles: 14,
+    /** While following, they yell again this often (seconds) whenever they can see you. */
+    reyellSeconds: 4,
+    /** Following: they stop and stare once they're this close (tiles). */
+    followKeepTiles: 1.75,
+    /** Following: they give up after this many seconds without seeing you. */
+    followGiveUpSeconds: 6,
+    /** Seconds after giving up (or after Mr. Gravy catches you) that they leave you alone. */
     ignoreSeconds: 8,
-    /** Seconds of trying to reach Mr. Gravy before they give up and go back to wandering. */
-    giveUpSeconds: 20,
-    /** How much a student watching you lights up the red danger edge, relative to Mr. Gravy. */
-    dangerWeight: 0.6,
+
+    /** Seconds every student stays on high alert after a report reaches Mr. Gravy (another report restarts it). */
+    highAlertSeconds: 45,
+    /** On high alert their vision cone reaches this much further... */
+    highAlertRangeFactor: 1.3,
+    /** ...and this many degrees wider on each side. */
+    highAlertExtraHalfAngleDeg: 10,
+    /** On high alert they stroll this much faster, pause this much shorter and look around this much more. */
+    highAlertWalkFactor: 1.2,
+    highAlertPauseFactor: 0.6,
+    highAlertLookFactor: 1.6,
+    /** Word spreads: when high alert starts, the student nearest the yell talks first, the next this many seconds later... */
+    chatterGapSeconds: 0.6,
+    /** ...plus up to this much random delay each. */
+    chatterJitterSeconds: 0.5,
+    /** On high alert each student says something every so often (seconds, random in this range). */
+    chatterEverySeconds: [10, 20] as [number, number],
+
+    /** How much each student lights up the red danger edge (0-1), relative to Mr. Gravy's chase (0.6+). */
+    danger: {
+      /** Times their '?' meter (high alert only). */
+      notice: 0.6,
+      yelling: 0.7,
+      following: 0.45,
+    },
     /** Seconds before the same student warning toast can show again. */
     toastCooldownSeconds: 5,
+  },
+
+  /**
+   * The sleepy coworker naps under desks. Finish scrapping a desk and he may crawl out, panic, and
+   * pay you to keep quiet. Then he shuffles off and is gone.
+   */
+  sleepyCoworker: {
+    /** Chance (0-1) he's under a desk you just finished scrapping. */
+    chance: 0.25,
+    /** He turns up at most this many times per shift. */
+    maxPerShift: 1,
+    /** Dollars he pays you not to tell Mr. Gravy (counts toward the shift's earnings). */
+    hushMoney: 50,
+    /** Fixtures he naps under (ids from src/config/fixtures.ts). */
+    napsUnder: ['desk'],
+    /** Seconds he keeps snoozing beside the desk before jolting awake. */
+    napSeconds: 1.5,
+    /** Seconds of the jolt ('!') before he starts talking. */
+    wakeSeconds: 0.7,
+    /** Seconds each of his two dialog lines stays up. */
+    lineSeconds: [2.4, 4.6] as [number, number],
+    /** Shuffling off: speed (tiles/s), how far he tries to get from you (tiles), and the fade at the end (seconds). */
+    shuffleTilesPerSecond: 0.9,
+    shuffleTiles: 5,
+    /** He fades out after this many seconds of shuffling even if he hasn't got there. */
+    shuffleSeconds: 5,
+    fadeSeconds: 0.8,
   },
 };

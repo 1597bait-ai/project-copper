@@ -1,5 +1,4 @@
 import lincoln from '../assets/maps/lincoln.txt?raw';
-import schoolTiles from '../assets/tiles/school-tiles.png';
 
 // The maps. A map is a plain text file (see src/world/mapText.ts for the format and
 // src/world/legend.ts for the characters). Edit one in any text editor or with the in-game
@@ -16,5 +15,5 @@ export const MAPS: MapEntry[] = [{ key: 'lincoln', name: 'Lincoln Middle School'
 
 export const DEFAULT_MAP = MAPS[0];
 
-export const TILESET_TEXTURE = 'tileset-school';
-export const TILESET_URL = schoolTiles;
+/** The tileset is drawn in code at boot (src/art/tiles.ts); see src/world/autotile.ts for its frames. */
+export { TILESET_TEXTURE } from './autotile';
