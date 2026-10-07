@@ -25,7 +25,7 @@ export interface FixtureDef {
   workSeconds: number;
   /** Blocks movement (and pathfinding). */
   solid: boolean;
-  /** Mounted on a wall: the sprite auto-rotates to face away from the nearest wall. */
+  /** Mounted on a wall: drawn from the front on a top wall, or from the side (mirrored as needed) on a side wall. */
   wallMounted: boolean;
 }
 

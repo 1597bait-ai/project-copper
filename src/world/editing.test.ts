@@ -212,6 +212,26 @@ describe('paint', () => {
     expect(parseMap(['pCCCp', 'pCCCp'].join('\n')).problems.join()).toContain('2x2');
   });
 
+  it('refuses a car that would touch another one half a car off (both would vanish)', () => {
+    const lot = ['pppppp', 'pCCppp', 'pCCppp', 'pppppp', 'pppppp'];
+    // Below and one tile to the right: an L-shaped block of cars, which no map can hold.
+    const offset = paint(lot, 2, 3, 'C');
+    expect(offset.changed).toBe(false);
+    expect(offset.message).toContain('parked car');
+    expect(offset.rows).toEqual(lot);
+    // Lined up exactly beside or below it is fine: two whole cars.
+    for (const [x, y] of [
+      [3, 1],
+      [1, 3],
+    ]) {
+      const r = paint(lot, x, y, 'C');
+      expect(r.changed).toBe(true);
+      const parsed = parseMap(r.rows.join('\n'));
+      expect(parsed.problems).toEqual([]);
+      expect(parsed.decor.filter((d) => d.id === 'car')).toHaveLength(2);
+    }
+  });
+
   it('places single-tile decorations like any other thing', () => {
     const r = paint(SMALL, 7, 7, '*');
     expect(parseMap(r.rows.join('\n')).decor).toEqual([{ id: 'plant', x: 7, y: 7, w: 1, h: 1 }]);

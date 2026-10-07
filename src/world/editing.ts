@@ -29,22 +29,16 @@ const BLOCKS: Record<string, { w: number; h: number }> = Object.fromEntries(
 /** True for tools that stamp a whole multi-tile decoration (a car). */
 export const isBlockTool = (ch: string) => ch in BLOCKS;
 
-/**
- * The cells of the one big decoration (a w x h piece of a block of its character) covering x,y.
- * A block of cars is cut into pieces from its top-left corner, the same way parseMap does it.
- */
-export function blockPiece(rows: readonly string[], x: number, y: number): TilePoint[] {
-  const ch = rows[y]?.[x];
-  const size = ch === undefined ? undefined : BLOCKS[ch];
-  if (!size) return [];
+/** The cells of the same character joined edge to edge with x,y, and their bounding box. */
+function connected(rows: readonly string[], x: number, y: number) {
+  const ch = rows[y][x];
   const seen = new Set<string>([`${x},${y}`]);
   const stack: TilePoint[] = [{ x, y }];
-  let minX = x;
-  let minY = y;
-  let maxX = x;
-  let maxY = y;
+  const cells: TilePoint[] = [];
+  let [minX, minY, maxX, maxY] = [x, y, x, y];
   while (stack.length) {
     const c = stack.pop()!;
+    cells.push(c);
     [minX, minY, maxX, maxY] = [Math.min(minX, c.x), Math.min(minY, c.y), Math.max(maxX, c.x), Math.max(maxY, c.y)];
     for (const [nx, ny] of [
       [c.x + 1, c.y],
@@ -58,6 +52,27 @@ export function blockPiece(rows: readonly string[], x: number, y: number): TileP
       }
     }
   }
+  return { cells, minX, minY, maxX, maxY };
+}
+
+/**
+ * True when the block of `ch` around x,y is a filled rectangle, as parseMap needs. A car stamped
+ * half a car off from another one, touching it, would make an L shape and both would vanish.
+ */
+function isWholeBlock(rows: readonly string[], x: number, y: number): boolean {
+  const { cells, minX, minY, maxX, maxY } = connected(rows, x, y);
+  return cells.length === (maxX - minX + 1) * (maxY - minY + 1);
+}
+
+/**
+ * The cells of the one big decoration (a w x h piece of a block of its character) covering x,y.
+ * A block of cars is cut into pieces from its top-left corner, the same way parseMap does it.
+ */
+export function blockPiece(rows: readonly string[], x: number, y: number): TilePoint[] {
+  const ch = rows[y]?.[x];
+  const size = ch === undefined ? undefined : BLOCKS[ch];
+  if (!size) return [];
+  const { minX, minY, maxX, maxY } = connected(rows, x, y);
   const px = minX + Math.floor((x - minX) / size.w) * size.w;
   const py = minY + Math.floor((y - minY) / size.h) * size.h;
   const out: TilePoint[] = [];
@@ -209,6 +224,9 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
     }
     for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) removeBig(cx, cy);
     for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) grid[cy][cx] = ch;
+    if (!isWholeBlock(grid.map((row) => row.join('')), r.x, r.y)) {
+      return { ...unchanged, message: `That would join onto another ${DECOR[DECOR_CHARS[ch]].name.toLowerCase()}: leave a gap, or line them up exactly` };
+    }
   } else if (ch === VAN) {
     const r = vanRect(rows, x, y, opts.vanRotated);
     if (!r) return { ...unchanged, message: 'The map is too small for the van' };

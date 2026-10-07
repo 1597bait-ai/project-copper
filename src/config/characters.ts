@@ -46,7 +46,7 @@ export interface CharacterDef {
   /** Trade specialty: +repair bonus on matching fixtures (see BALANCE.repair). */
   specialty: FixtureType | null;
   ability: AbilityId | null;
-  /** Sprite texture key (see src/art/sprites.ts). */
+  /** Sprite texture key: a look in LOOKS (src/art/characters.ts). */
   sprite: string;
   /** Stat block colour from the design board. */
   color: number;

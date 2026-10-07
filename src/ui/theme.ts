@@ -9,33 +9,42 @@ export { breakLigatures, isDarkColor, shadowOffset };
 
 /** The pixel font (loaded from Google Fonts by index.html; monospace if it can't be reached). */
 export const FONT_NAME = 'Pixelify Sans';
-export const FONT = `"${FONT_NAME}", monospace`;
+/**
+ * Pixelify Sans's 5 looks just like its S ("$50" reads "$S0", "7:05" reads "7:0S"), so digits come
+ * from Tiny5, a pixel font of the same height and weight. index.html loads only its digits 0-9,
+ * so every other character falls through to Pixelify Sans.
+ */
+export const DIGITS_FONT_NAME = 'Tiny5';
+export const FONT = `"${DIGITS_FONT_NAME}", "${FONT_NAME}", monospace`;
 /** Weights texts use (bold for titles). */
 const FONT_WEIGHTS = ['400', '700'];
 /** Never hold up the start for longer than this (offline, slow networks). */
 export const FONT_TIMEOUT_MS = 3000;
 
 /**
- * Waits (briefly) for the pixel font, so the first texts aren't drawn in the fallback font.
- * index.html loads the font's stylesheet without blocking the page (media="print"); this switches
- * it on once it arrives. Gives up after FONT_TIMEOUT_MS so offline play still starts.
+ * Waits (briefly) for the pixel fonts, so the first texts aren't drawn in the fallback font.
+ * index.html loads the fonts' stylesheets without blocking the page (media="print"); this switches
+ * them on once they arrive. Gives up after FONT_TIMEOUT_MS so offline play still starts.
  */
 export async function loadFonts(timeoutMs = FONT_TIMEOUT_MS): Promise<void> {
   if (typeof document === 'undefined' || !document.fonts) return;
-  const link = document.querySelector<HTMLLinkElement>('link[data-pixel-font]');
-  // Offline: the stylesheet has already failed, there is nothing to wait for.
-  if (link && !link.sheet && typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  const ready = (async () => {
-    if (link) {
-      if (!link.sheet) {
-        await new Promise<void>((done) => {
+  const links = [...document.querySelectorAll<HTMLLinkElement>('link[data-pixel-font]')];
+  // Offline: the stylesheets have already failed, there is nothing to wait for.
+  if (links.some((l) => !l.sheet) && typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const sheetLoaded = (link: HTMLLinkElement) =>
+    link.sheet
+      ? Promise.resolve()
+      : new Promise<void>((done) => {
           link.addEventListener('load', () => done(), { once: true });
           link.addEventListener('error', () => done(), { once: true });
         });
-      }
-      link.media = 'all';
-    }
-    await Promise.all(FONT_WEIGHTS.map((w) => document.fonts.load(`${w} 32px "${FONT_NAME}"`)));
+  const ready = (async () => {
+    await Promise.all(links.map(sheetLoaded));
+    for (const link of links) link.media = 'all';
+    await Promise.all([
+      ...FONT_WEIGHTS.map((w) => document.fonts.load(`${w} 32px "${FONT_NAME}"`)),
+      document.fonts.load(`32px "${DIGITS_FONT_NAME}"`, '0123456789'),
+    ]);
   })().catch(() => undefined);
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([ready, new Promise<void>((done) => (timer = setTimeout(done, timeoutMs)))]);

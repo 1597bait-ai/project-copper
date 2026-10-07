@@ -125,6 +125,23 @@ describe('floors', () => {
     expect(floorFrameAt(map, 1, 1)!.char).toBe(',');
   });
 
+  it('trees stand on grass and cars on plain asphalt when there is some beside them', () => {
+    // A tree at the left edge of a grass island, next to a parking line, and a car between lines.
+    const map = grid('pppppp', '|Tg|CC', '|gg|CC', 'pppppp');
+    expect(floorFrameAt(map, 1, 1)!.char).toBe('g');
+    for (const [x, y] of [
+      [4, 1],
+      [5, 1],
+      [4, 2],
+      [5, 2],
+    ]) {
+      expect(floorFrameAt(map, x, y)!.char).toBe('p');
+    }
+    // A plant keeps the parser's floor, and a tree with no grass around keeps its floor too.
+    expect(floorFrameAt(grid('.*,'), 1, 0)!.char).toBe('.');
+    expect(floorFrameAt(grid('pTp'), 1, 0)!.char).toBe('p');
+  });
+
   it('picks versions the same way every time, mostly the plain one', () => {
     let plain = 0;
     for (let y = 0; y < 40; y++) {

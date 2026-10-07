@@ -42,8 +42,8 @@ export const SEE_THROUGH_WALLS = new Set(['F']);
 export const FLOOR_VARIANTS: Record<string, { count: number; plain: number }> = {
   '.': { count: 4, plain: 0.55 },
   ',': { count: 2, plain: 0.7 },
-  b: { count: 4, plain: 0.5 },
-  j: { count: 2, plain: 0.6 },
+  b: { count: 4, plain: 0.7 },
+  j: { count: 2, plain: 0.85 },
   o: { count: 2, plain: 0.5 },
   p: { count: 4, plain: 0.5 },
   // Parking lines are picked by their neighbours, not at random: 0 middle, 1 top end, 2 bottom end, 3 both.
@@ -192,6 +192,29 @@ export interface TileGrid {
   floor: readonly (readonly number[])[];
   /** Tile index of the wall per cell, -1 where there is none. */
   walls: readonly (readonly number[])[];
+  /** The map as written, one string per row (to see which cells hold a tree or a car). */
+  rows?: readonly string[];
+}
+
+/**
+ * The map parser puts the nearest floor (left first) under a thing, which looks wrong for some:
+ * a tree at the left edge of a grass island would stand on asphalt, a parked car on a parking
+ * line. When one of these is next to such a thing, it stands on that floor instead.
+ */
+export const PREFERRED_FLOOR: Record<string, string> = { T: 'g', C: 'p' };
+
+function preferredFloor(g: TileGrid, x: number, y: number): string | null {
+  const want = PREFERRED_FLOOR[g.rows?.[y]?.[x] ?? ''];
+  if (!want) return null;
+  for (const [dx, dy] of [
+    [0, 1],
+    [0, -1],
+    [-1, 0],
+    [1, 0],
+  ]) {
+    if (floorCharAt(g, x + dx, y + dy) === want) return want;
+  }
+  return null;
 }
 
 const wallCharAt = (g: TileGrid, x: number, y: number): string | null => {
@@ -253,7 +276,7 @@ function floorUnderFence(g: TileGrid, x: number, y: number): string {
 export function floorFrameAt(g: TileGrid, x: number, y: number): FloorFrame | null {
   const wall = wallCharAt(g, x, y);
   if (wall !== null && !SEE_THROUGH_WALLS.has(wall)) return null;
-  const ch = wall !== null ? floorUnderFence(g, x, y) : (floorCharAt(g, x, y) ?? '.');
+  const ch = wall !== null ? floorUnderFence(g, x, y) : (preferredFloor(g, x, y) ?? floorCharAt(g, x, y) ?? '.');
   let variant: number;
   if (ch === '|') variant = (floorCharAt(g, x, y - 1) === '|' ? 0 : 1) | (floorCharAt(g, x, y + 1) === '|' ? 0 : 2);
   else variant = floorVariant(ch, x, y);
