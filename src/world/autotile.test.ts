@@ -165,4 +165,19 @@ describe('placement helpers', () => {
     for (let i = 0; i < 50; i++) picks.add(pickForCell(['a', 'b', 'c', 'd'], i, i * 3));
     expect(picks.size).toBe(4);
   });
+
+  it('cars parked on a regular grid still get a fair mix of colours', () => {
+    // Parking spaces every 3 tiles in two rows, like the lot on the Lincoln map.
+    const colours = ['red', 'blue', 'white', 'brown', 'green', 'yellow'];
+    const counts = new Map<string, number>();
+    for (let x = 0; x < 48; x += 3) {
+      for (const y of [32, 35]) {
+        const c = pickForCell(colours, x, y, 17);
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
+    }
+    expect(counts.size).toBe(colours.length);
+    // No colour takes over the lot (32 cars, about 5 of each).
+    expect(Math.max(...counts.values())).toBeLessThanOrEqual(10);
+  });
 });

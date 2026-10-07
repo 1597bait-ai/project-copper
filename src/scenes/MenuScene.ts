@@ -1,16 +1,50 @@
 import Phaser from 'phaser';
 import { ABILITIES, CHARACTERS, CHARACTER_ORDER } from '../config/characters';
+import { oncePerKeyEvent } from '../input/Controls';
 import { sfx, unlockAudio } from '../systems/sfx';
 import { loadSave, updateSave } from '../systems/save';
-import { Button, COLORS, fitColumn, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, drawCursor, fitColumn, fitWidth, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
+import { addTileLayers } from '../world/World';
+import { parseMap } from '../world/mapText';
+import { DEFAULT_MAP } from '../world/maps';
 
 interface Card {
   id: string;
   frame: Phaser.GameObjects.Graphics;
+  portrait: Phaser.GameObjects.Image;
+  name: Phaser.GameObjects.Text;
   x: number;
   y: number;
   w: number;
   h: number;
+  compact: boolean;
+}
+
+/** Dark wash over the backdrop so the windows stand out. */
+const BACKDROP_DIM = { color: 0x141a30, alpha: 0.62 };
+
+/**
+ * The school itself, drawn from the map file and slowly panning, as the backdrop of the menu
+ * screens. Covers the area 0,0 - W,H (in the scene's camera space).
+ */
+export function addSchoolBackdrop(scene: Phaser.Scene, W: number, H: number): void {
+  scene.add.rectangle(0, 0, W, H, 0x1c2238).setOrigin(0).setDepth(-12);
+  try {
+    const map = parseMap(DEFAULT_MAP.text);
+    const { floor, walls } = addTileLayers(scene, map);
+    const mapW = floor.width;
+    const mapH = floor.height;
+    const scale = Math.max((W * 1.25) / mapW, H / (mapH * 0.62));
+    const travelX = Math.max(0, mapW * scale - W);
+    const y = -(mapH * scale - H) * 0.35;
+    for (const layer of [floor, walls]) {
+      layer.setScale(scale).setPosition(0, y).setDepth(layer === floor ? -11 : -10);
+      scene.tweens.add({ targets: layer, x: -travelX, duration: 40000, yoyo: true, repeat: -1, ease: 'Sine.InOut' });
+    }
+  } catch {
+    // A broken map file: the plain colour is fine (the menu says what's wrong).
+  }
+  scene.add.rectangle(0, 0, W, H, BACKDROP_DIM.color, BACKDROP_DIM.alpha).setOrigin(0).setDepth(-9);
 }
 
 /** Title screen + crew select. Cards sit in a row in landscape and stack in portrait. */
@@ -43,78 +77,94 @@ export class MenuScene extends Phaser.Scene {
     // Portrait content is a 1080-wide column, vertically centred.
     const top = portrait ? Math.max(0, (H - columnH) / 2) : 0;
 
-    this.drawBackground(W, H);
+    addSchoolBackdrop(this, W, H);
     if (this.notice) {
-      this.add
-        .text(W / 2, top + 18, this.notice, textStyle(26, COLORS.bad, { align: 'center', wordWrap: { width: Math.min(W - 80, 1600) } }))
+      const t = this.add
+        .text(W / 2, top + 22, this.notice, textStyle(26, COLORS.boxBad, { align: 'center', wordWrap: { width: Math.min(W - 120, 1560) } }))
         .setOrigin(0.5, 0)
-        .setDepth(10);
+        .setDepth(11);
+      drawBox(this.add.graphics().setDepth(10), W / 2 - t.width / 2 - 28, top + 6, t.width + 56, t.height + 32, { unit: 4 });
     }
 
     // Title
-    this.add.text(cx, top + 70, 'PROJECT', textStyle(46, COLORS.muted)).setOrigin(0.5, 0);
+    this.add.text(cx, top + 66, 'PROJECT', textStyle(50, COLORS.text, { fontStyle: '700' })).setOrigin(0.5, 0);
     const title = this.add
-      .text(cx, top + 112, 'COPPER', textStyle(portrait ? 170 : 150, COLORS.copper, { strokeThickness: 18 }))
+      .text(cx, top + 104, 'COPPER', textStyle(portrait ? 190 : 170, COLORS.copper, { fontStyle: '700', strokeThickness: 18, shadow: { offsetX: 10, offsetY: 10, color: COLORS.ink, blur: 0, stroke: true, fill: true } }))
       .setOrigin(0.5, 0);
-    title.setShadow(0, 10, '#000000', 0, true, true);
-    this.tweens.add({ targets: title, scale: { from: 1, to: 1.03 }, yoyo: true, repeat: -1, duration: 1200, ease: 'Sine.InOut' });
+    this.tweens.add({ targets: title, y: title.y - 8, yoyo: true, repeat: -1, duration: 900, ease: 'Stepped', easeParams: [4] });
     const tagline = "Strip the school for scrap. Get it to the van. Don't let Mr. Gravy catch you.";
-    this.add
-      .text(cx, top + (portrait ? 320 : 290), tagline, textStyle(30, COLORS.text, { align: 'center', wordWrap: { width: portrait ? 900 : 1600 } }))
+    const tagY = top + (portrait ? 330 : 296);
+    const tag = this.add
+      .text(cx, tagY, tagline, textStyle(portrait ? 38 : 30, COLORS.boxText, { align: 'center', wordWrap: portrait ? { width: 880 } : undefined }))
       .setOrigin(0.5, 0);
+    if (!portrait) fitWidth(tag, 1420);
+    drawBox(this.add.graphics(), cx - tag.width / 2 - 36, tagY - 20, tag.width + 72, tag.height + 40, { unit: 4 });
+    tag.setDepth(1);
 
     // Crew cards
     let buttonY: number;
     if (portrait) {
       const cardW = 960;
       const cardH = 300;
-      const y0 = top + 440;
+      const y0 = top + 450;
       CHARACTER_ORDER.forEach((id, i) => this.buildCard(id, cx - cardW / 2, y0 + i * (cardH + 28), cardW, cardH, true));
       buttonY = y0 + CHARACTER_ORDER.length * (cardH + 28) + 90;
     } else {
       const cardW = 400;
-      const cardH = 440;
+      const cardH = 468;
       const gap = 36;
       const totalW = CHARACTER_ORDER.length * cardW + (CHARACTER_ORDER.length - 1) * gap;
-      CHARACTER_ORDER.forEach((id, i) => this.buildCard(id, cx - totalW / 2 + i * (cardW + gap), 370, cardW, cardH, false));
-      buttonY = 370 + cardH + 110;
+      CHARACTER_ORDER.forEach((id, i) => this.buildCard(id, cx - totalW / 2 + i * (cardW + gap), 380, cardW, cardH, false));
+      buttonY = 380 + cardH + 92;
     }
     this.refreshCards();
 
-    // START SHIFT with the (secondary, grey) MAP EDITOR beside it in landscape, under it in portrait.
-    const editor = { fill: 0x3d4558, fontSize: 38 };
+    // START SHIFT with the (secondary) MAP EDITOR beside it in landscape, under it in portrait.
+    const editor = { ...BUTTON_SECONDARY, fontSize: portrait ? 44 : 38 };
     if (portrait) {
-      new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { width: 700, height: 112, fontSize: 52 });
+      new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { ...BUTTON_PRIMARY, width: 700, height: 112, fontSize: 52 }).setSelected(true);
       buttonY += 132;
-      new Button(this, cx, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: 480, height: 88 });
+      new Button(this, cx, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: 520, height: 96 });
     } else {
       const gap = 40;
       const startW = 520;
       const editorW = 360;
       const left = cx - (startW + gap + editorW) / 2;
-      new Button(this, left + startW / 2, buttonY, 'START SHIFT', () => this.play(), { width: startW, height: 112, fontSize: 52 });
+      new Button(this, left + startW / 2, buttonY, 'START SHIFT', () => this.play(), { ...BUTTON_PRIMARY, width: startW, height: 112, fontSize: 52 }).setSelected(true);
       new Button(this, left + startW + gap + editorW / 2, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: editorW, height: 96 });
+    }
+
+    // The van and Mr. Gravy keep an eye on things from the corners.
+    if (portrait) {
+      if (H - (buttonY + 300) > 150) this.add.image(cx, H - 110, 'van_big').setScale(0.5);
+    } else {
+      this.add.image(W - 210, buttonY - 12, 'van_big').setScale(0.6);
+      this.add.image(190, buttonY - 6, 'mr_gravy_big').setScale(0.8);
     }
 
     const help = isTouchDevice()
       ? `Left thumb moves  ·  big button scraps  ·  bring scrap to the white van to sell it${portrait ? '  ·  turn sideways for a wider view' : ''}`
       : 'WASD / arrows move  ·  E scraps  ·  Q uses your ability  ·  bring scrap to the white van to sell it';
-    const footY = portrait ? buttonY + 90 : H - 70;
-    this.add.text(cx, footY, help, textStyle(24, COLORS.muted, { align: 'center', wordWrap: { width: portrait ? 900 : 1800 } })).setOrigin(0.5, 0);
+    const footY = portrait ? buttonY + 90 : H - 74;
+    const helpText = this.add.text(cx, footY, help, textStyle(portrait ? 34 : 26, COLORS.text, { align: 'center', wordWrap: portrait ? { width: 900 } : undefined })).setOrigin(0.5, 0);
+    if (!portrait) fitWidth(helpText, Math.min(W - 800, 1500));
     if (save.bestShift > 0) {
       this.add
-        .text(cx, portrait ? footY + 100 : H - 34, `Best shift: ${money(save.bestShift)}   ·   Lifetime: ${money(save.totalEarned)}`, textStyle(22, COLORS.copper))
+        .text(cx, portrait ? footY + 130 : H - 30, `Best shift: ${money(save.bestShift)}   ·   Lifetime: ${money(save.totalEarned)}`, textStyle(portrait ? 32 : 24, COLORS.copper))
         .setOrigin(0.5);
     }
 
     const kb = this.input.keyboard!;
-    kb.on('keydown', (e: KeyboardEvent) => {
-      unlockAudio();
-      const i = CHARACTER_ORDER.indexOf(this.selected);
-      if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'a') this.select(CHARACTER_ORDER[(i + CHARACTER_ORDER.length - 1) % CHARACTER_ORDER.length]);
-      if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'd') this.select(CHARACTER_ORDER[(i + 1) % CHARACTER_ORDER.length]);
-      if (e.key === 'Enter' || e.key === ' ') this.play();
-    });
+    kb.on(
+      'keydown',
+      oncePerKeyEvent((e: KeyboardEvent) => {
+        unlockAudio();
+        const i = CHARACTER_ORDER.indexOf(this.selected);
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'a') this.select(CHARACTER_ORDER[(i + CHARACTER_ORDER.length - 1) % CHARACTER_ORDER.length]);
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'd') this.select(CHARACTER_ORDER[(i + 1) % CHARACTER_ORDER.length]);
+        if (e.key === 'Enter' || e.key === ' ') this.play();
+      }),
+    );
     this.input.on('pointerdown', () => unlockAudio());
 
     this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
@@ -126,57 +176,62 @@ export class MenuScene extends Phaser.Scene {
     this.scene.restart();
   }
 
-  private drawBackground(W: number, H: number) {
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x1d2230, 0x1d2230, 0x0f1117, 0x0f1117, 1).fillRect(0, 0, W, H);
-    // Big faint copper coil behind the title.
-    for (let r = 140; r < 900; r += 70) g.lineStyle(14, 0xe0823d, 0.05).strokeCircle(W / 2, 220, r);
-    this.add.image(W - 190, H - 250, 'van_big').setRotation(Math.PI / 2).setAlpha(0.18).setScale(0.9);
-    this.add.image(170, H - 210, 'mr_gravy_big').setRotation(-0.4).setAlpha(0.14);
-  }
-
   private buildCard(id: string, x: number, y: number, w: number, h: number, compact: boolean) {
     const c = CHARACTERS[id];
     const frame = this.add.graphics();
-    this.cards.push({ id, frame, x, y, w, h });
     const stats: [string, number][] = [
       ['SPEED', c.stats.speed],
       ['REPAIR', c.stats.repair],
       ['CARRY', c.stats.carry],
     ];
     const ability = c.ability ? ABILITIES[c.ability].name : 'No special ability (yet)';
-    const abilityColor = c.ability ? '#c9a7ff' : COLORS.muted;
+    const abilityColor = c.ability ? '#6a3cb0' : COLORS.boxMuted;
     const pips = this.add.graphics();
+    // Stats as little bars, like a GBA status screen.
     const drawPips = (sx: number, sy: number, value: number) => {
       for (let p = 0; p < 3; p++) {
-        pips.fillStyle(p < value ? c.color : 0x000000, p < value ? 1 : 0.45).fillRoundedRect(sx + p * 52, sy - 11, 44, 22, 6);
+        drawBox(pips, sx + p * 54, sy - 13, 48, 26, { unit: 3, rim: null, fill: p < value ? c.color : 0xd8d4c8 });
       }
     };
+    // Portrait in a light blue frame (the art faces the camera, upright).
+    const pSize = compact ? 236 : 184;
+    const px = compact ? x + 32 : x + (w - pSize) / 2;
+    const py = compact ? y + (h - pSize) / 2 : y + 26;
+    const pf = this.add.graphics();
+    drawBox(pf, px, py, pSize, pSize, { unit: 4, fill: 0xdfe9f5 });
+    const portrait = this.add.image(px + pSize / 2, py + pSize / 2, `${c.sprite}_big`);
+    portrait.setScale((pSize - 34) / Math.max(portrait.width, portrait.height));
 
+    let name: Phaser.GameObjects.Text;
     if (compact) {
-      // Portrait: portrait on the left, details on the right.
-      this.add.image(x + 140, y + h / 2, `${c.sprite}_big`).setRotation(-Math.PI / 2).setScale(0.95);
-      const tx = x + 290;
-      this.add.text(tx, y + 26, c.name.toUpperCase(), textStyle(48)).setOrigin(0, 0);
-      this.add.text(tx, y + 86, c.tagline, textStyle(24, COLORS.muted)).setOrigin(0, 0);
+      const tx = x + 300;
+      // Portrait phones show this column small: bigger text.
+      name = this.add.text(tx, y + 26, c.name.toUpperCase(), textStyle(60, COLORS.boxText, { fontStyle: '700' })).setOrigin(0, 0);
+      fitWidth(this.add.text(tx, y + 98, c.tagline, textStyle(32, COLORS.boxMuted)).setOrigin(0, 0), x + w - 34 - tx);
+      const pipsX = tx + 130;
       stats.forEach(([label, value], i) => {
-        const sy = y + 150 + i * 36;
-        this.add.text(tx, sy, label, textStyle(22)).setOrigin(0, 0.5);
-        drawPips(tx + 140, sy, value);
+        const sy = y + 164 + i * 42;
+        this.add.text(tx, sy, label, textStyle(30, COLORS.boxText)).setOrigin(0, 0.5);
+        drawPips(pipsX, sy, value);
       });
-      this.add.text(x + w - 30, y + h - 26, ability, textStyle(22, abilityColor)).setOrigin(1, 1);
+      // Beside the last row of pips, never over them.
+      const pipsRight = pipsX + 2 * 54 + 48 + 24;
+      fitWidth(this.add.text(x + w - 30, y + h - 26, ability, textStyle(30, abilityColor)).setOrigin(1, 1), x + w - 30 - pipsRight);
     } else {
       const mid = x + w / 2;
-      this.add.image(mid, y + 110, `${c.sprite}_big`).setRotation(-Math.PI / 2).setScale(0.9);
-      this.add.text(mid, y + 214, c.name.toUpperCase(), textStyle(44)).setOrigin(0.5, 0);
-      this.add.text(mid, y + 266, c.tagline, textStyle(20, COLORS.muted)).setOrigin(0.5, 0);
+      name = this.add.text(mid, y + 222, c.name.toUpperCase(), textStyle(48, COLORS.boxText, { fontStyle: '700' })).setOrigin(0.5, 0);
+      fitWidth(this.add.text(mid, y + 278, c.tagline, textStyle(24, COLORS.boxMuted)).setOrigin(0.5, 0), w - 44);
       stats.forEach(([label, value], i) => {
-        const sy = y + 312 + i * 34;
-        this.add.text(x + 40, sy, label, textStyle(22)).setOrigin(0, 0.5);
-        drawPips(x + 200, sy, value);
+        const sy = y + 330 + i * 36;
+        this.add.text(x + 42, sy, label, textStyle(24, COLORS.boxText)).setOrigin(0, 0.5);
+        drawPips(x + 196, sy, value);
       });
-      this.add.text(mid, y + h - 22, ability, textStyle(20, abilityColor)).setOrigin(0.5, 1);
+      fitWidth(this.add.text(mid, y + h - 22, ability, textStyle(24, abilityColor)).setOrigin(0.5, 1), w - 44);
     }
+
+    // Windows go under the texts drawn above.
+    frame.setDepth(-1);
+    this.cards.push({ id, frame, portrait, name, x, y, w, h, compact });
 
     const hit = this.add.zone(x + w / 2, y + h / 2, w, h).setInteractive({ useHandCursor: true });
     hit.on('pointerup', () => {
@@ -194,13 +249,20 @@ export class MenuScene extends Phaser.Scene {
 
   private refreshCards() {
     for (const card of this.cards) {
-      const c = CHARACTERS[card.id];
       const on = card.id === this.selected;
-      const g = card.frame;
-      g.clear();
-      g.fillStyle(0x12151c, on ? 0.95 : 0.7).fillRoundedRect(card.x, card.y, card.w, card.h, 24);
-      g.lineStyle(on ? 8 : 3, on ? c.color : 0x3a4152, 1).strokeRoundedRect(card.x, card.y, card.w, card.h, 24);
-      if (on) g.fillStyle(c.color, 0.12).fillRoundedRect(card.x, card.y, card.w, card.h, 24);
+      const g = card.frame.clear();
+      if (on) drawBox(g, card.x - 6, card.y - 6, card.w + 12, card.h + 12, { unit: 6, fill: COLORS.accentFill, rim: COLORS.accent });
+      else drawBox(g, card.x, card.y, card.w, card.h, { unit: 5 });
+      // The ▶ cursor points at the chosen one.
+      if (on) {
+        const n = card.name;
+        drawCursor(g, n.x - n.width * n.originX - 12, n.y + n.height * (0.5 - n.originY), 30);
+      }
+      // The chosen one hops, like a party slot in the GBA games.
+      this.tweens.killTweensOf(card.portrait);
+      const base = card.compact ? card.y + card.h / 2 : card.y + 26 + 92;
+      card.portrait.y = base;
+      if (on) this.tweens.add({ targets: card.portrait, y: base - 8, yoyo: true, repeat: -1, duration: 260, ease: 'Stepped', easeParams: [1], hold: 260, repeatDelay: 260 });
     }
   }
 

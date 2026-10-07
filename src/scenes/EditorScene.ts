@@ -737,12 +737,13 @@ export class EditorScene extends Phaser.Scene {
       anchors.lineStyle(6, 0xe8914a, 0.95).strokeRect(n.x * TILE + 3, n.y * TILE + 3, TILE - 6, TILE - 6);
       const { cx, cy } = center(n.x, n.y);
       const tag = this.add
-        .text(cx, cy, n.name, textStyle(NAME_TAG_PX, '#ffe2c4', { backgroundColor: 'rgba(18,21,28,0.6)', padding: { x: 8, y: 4 }, strokeThickness: 0 }))
+        .text(cx, cy, n.name, textStyle(NAME_TAG_PX, '#ffe2c4', { backgroundColor: 'rgba(18,21,28,0.6)', padding: { x: 8, y: 4 }, strokeThickness: 0, align: 'center' }))
         .setOrigin(0.5)
         .setScale(this.labelScale(NAME_TAG_PX, NAME_TAG_MAX_SCALE));
       layer.add(tag);
       this.nameTags.push(tag);
     }
+    this.untangleNameTags();
   }
 
   /** Scale for map labels drawn `basePx` tall so they stay about 12 CSS px tall at any zoom. */
@@ -1187,7 +1188,22 @@ export class EditorScene extends Phaser.Scene {
     const scale = this.labelScale(40);
     for (const r of this.rulers) r.setScale(scale);
     for (const t of this.nameTags) t.setScale(this.labelScale(NAME_TAG_PX, NAME_TAG_MAX_SCALE));
+    this.untangleNameTags();
     this.drawCursor();
+  }
+
+  /**
+   * Tags stay the same size on screen, so zoomed out, rooms side by side (the restrooms, a row of
+   * classrooms) can have overlapping names: those tags wrap onto two lines.
+   */
+  private untangleNameTags() {
+    const tags = this.nameTags;
+    for (const t of tags) if (t.style.wordWrapWidth !== null) t.setWordWrapWidth(null);
+    const boxes = tags.map((t) => t.getBounds());
+    tags.forEach((t, i) => {
+      const crowded = boxes.some((b, j) => j !== i && Phaser.Geom.Rectangle.Overlaps(b, boxes[i]));
+      if (crowded && t.text.includes(' ')) t.setWordWrapWidth(t.width * 0.6);
+    });
   }
 
   /** Outline of what the current tool would change under the pointer. */

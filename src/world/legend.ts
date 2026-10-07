@@ -1,6 +1,6 @@
 // What each character in a map file means. Maps are plain text: one character = one 64px tile.
-// The tile ORDER must match the art in tools/tiles.mjs (the PNG is cut up by position);
-// src/world/legend.test.ts checks that.
+// The tileset is drawn in code at boot (src/art/tiles.ts) and src/world/autotile.ts picks each
+// cell's frame by name, so the order of TILES only matters for the editor's palette.
 
 import { DECOR } from '../config/decor';
 
@@ -29,7 +29,7 @@ export interface TileDef {
   room?: RoomKind;
 }
 
-/** Index in this list = frame in school-tiles.png. */
+/** Every floor and wall, in the order the map editor's palette shows them. */
 export const TILES: TileDef[] = [
   { char: '.', name: 'Hallway floor', layer: 'floor', room: 'hallway' },
   { char: ',', name: 'Classroom carpet', layer: 'floor', room: 'classroom' },

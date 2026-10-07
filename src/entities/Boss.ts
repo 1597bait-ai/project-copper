@@ -10,7 +10,7 @@ import type { Player } from './Player';
 import { Emote, SpeechBubble } from './SpeechBubble';
 
 const RADIUS = TILE * 0.3;
-/** His '!' while sprinting to a student's yell (red while chasing, the default '!' colour). */
+/** His '!' turns orange while he sprints to a student's yell (it's the default red while chasing). */
 const RESPOND_COLOR = 0xf08a24;
 
 export type BossState = 'patrol' | 'pause' | 'alert' | 'chase' | 'search' | 'return' | 'respond';

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SHEET_PAD } from '../art/characters';
+import { SHEET_PAD, type SheetFrameData } from '../art/characters';
 import { PX } from '../art/pixel';
 import { TILE } from '../config/balance';
 import { sortDepth } from '../ui/depth';
@@ -13,7 +13,8 @@ import { type Facing, facingOf, nextFacing, restartDistance, sleepFrame, walkFra
 //                   i = 0 standing, 1 and 2 walking steps. Optional: `${facing}-yell` (shouting,
 //                   pointing), `${facing}-work-0|1` (hammering) and `sleep-0|1` (dozing).
 //   `${key}_big`    portrait for menus and dialog boxes
-// Sheet frames have an empty border of SHEET_PAD art pixels (so neighbours don't bleed in).
+// Sheet frames have an empty border of SHEET_PAD art pixels (so neighbours don't bleed in), and
+// may say where the head starts (customData.headRow, see SheetFrameData).
 //
 // The game moves a physics body around; every frame the owner calls update() with the body's
 // position and facing angle, and the view picks the frame, sorts itself by depth (by its feet)
@@ -64,6 +65,7 @@ export class CharacterView {
   private frame = '';
   private walked = 0;
   private wasMoving = false;
+  private wasWorking = false;
   private lastX: number;
   private lastY: number;
   private lastTime = -1;
@@ -97,9 +99,14 @@ export class CharacterView {
     return FEET * this.scale;
   }
 
-  /** How far above the body centre the head ends (negative): '!' marks and speech bubbles go here. */
+  /**
+   * How far above the body centre the head ends (negative): '!' marks and speech bubbles go here.
+   * Follows the frame (lower when dozing slumped over) but not the walking bob, so marks stay put.
+   */
   get headTop(): number {
-    return this.feet - this.artHeight;
+    const data = this.sheet ? (this.sprite.frame.customData as SheetFrameData | null) : null;
+    const row = data?.headRow ?? (this.sheet ? SHEET_PAD : 0);
+    return this.sprite.y - this.sprite.displayHeight + row * PX * this.scale;
   }
 
   /** Height of the person drawn (without the sheet frame's empty border). */
@@ -132,7 +139,9 @@ export class CharacterView {
     this.lastX = x;
     this.lastY = y;
 
-    this.facing = nextFacing(this.facing, angle);
+    // Starting work: face the work squarely (no hysteresis), the angle points right at it.
+    this.facing = opts.working && !this.wasWorking ? facingOf(angle) : nextFacing(this.facing, angle);
+    this.wasWorking = !!opts.working;
     this.container.setPosition(x, y).setDepth(sortDepth(y + this.feet));
 
     const stride = (opts.running ? STRIDE.run : STRIDE.walk) * this.scale;

@@ -5,7 +5,7 @@
 // Floors and walls:
 //   .  Hallway floor
 //   ,  Classroom carpet
-//   ~  Restroom tile
+//   ~  Restroom tile (blue)
 //   b  Boiler room concrete
 //   o  Office carpet
 //   j  Janitor's concrete
@@ -19,6 +19,8 @@
 //   =  Lobby terrazzo
 //   k  Storage plywood
 //   n  Lounge linoleum
+//   W  Whiteboard wall
+//   ^  Restroom tile (pink)
 //
 // Things (they stand on the floor next to them):
 //   P  Player start
@@ -33,59 +35,76 @@
 //   c  abandoned copper pile
 //   d  desk
 //   l  lamp
+//   e  electric panel
+//   *  Potted plant
+//   u  Trash can
+//   T  Tree
+//   C  Parked car (fill a 2x2 block)
 //   1-9  Mr. Gravy's route, walked in order and looped
+//
+// Lincoln Middle School, drawn from the floor-plan sketch: classrooms 1-8 along the top,
+// classrooms 9-12 and the restrooms in the middle, the boiler room (and its locked electric
+// panel room) on the right, reached only by the narrow corridor along the right wall.
+// The best copper is the deepest: boiler room, electric panel room and custodial closet.
 
-@ 9,40 Front Office
-@ 40,40 Nurse's Office
-@ 40,6 Mechanical Room
+@ 5,5 Classroom 1
+@ 10,5 Classroom 2
+@ 15,5 Classroom 3
+@ 20,5 Classroom 4
+@ 25,5 Classroom 5
+@ 30,5 Classroom 6
+@ 35,5 Classroom 7
+@ 40,5 Classroom 8
+@ 10,16 Classroom 9
+@ 17,14 Classroom 10
+@ 10,21 Classroom 11
+@ 15,21 Classroom 12
+@ 26,18 Men's Restroom
+@ 30,18 Women's Restroom
+@ 40,15 Boiler Room
+@ 39,24 Electric Panel Room
+@ 45,5 Custodial Closet
+@ 21,28 Main Entrance
+@ 20,10 Hallway
+@ 10,31 Parking Lot
 
-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
-Fgg____________________________________________ggF
-Fgg_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB_ggF
-Fgg_Bbbbbbbbbbbb#ooooool#kkkkkkkkk#bbbbbbbbbbB_ggF
-Fgg_Bbbbcbbbbbbb#oodoooo#klkkkckkk#bbbbbbbbbhB_ggF
-Fgg_Bbbbbbbbbbbh#oooGooo#kkkkkkkkk#bbbbbcbbbbB_ggF
-Fgg_Bbbbbbbbbbbb#ooooooo#kkkkkkkkk#bbbbbbbbbbB_ggF
-Fgg_Bhbbbbbbcbbb#ooo1ooo#klkkkkkdk#bbbbbbbbbhB_ggF
-Fgg_Bbbbbbbbbbbb#ooooooo#kkkkkkkkk#hbbbbbbbbbB_ggF
-Fgg_Bbbbbbbbbbbb#ooooooo#kkkkkkkkk#bbbbbbbbbbB_ggF
-Fgg_B########LL#####..######..#########LL####B_ggF
-Fgg_B....f......................f............B_ggF
-Fgg_B....2...............................3...B_ggF
-Fgg_B...h...............h.................h..B_ggF
-Fgg_B########...###..#######..###...#########B_ggF
-Fgg_B~~~~~~~#...#,,,,,,l#l,,,,,,#...#jjjjjjjjB_ggF
-Fgg_Bt~~~~~~#...#,,,,,,,#,,,,,,,#...#jjjjjjjmB_ggF
-Fgg_B~~~~~~~#.8.#,d,,,d,#,d,,,d,#....jjjjjjjjB_ggF
-Fgg_B~~~~~~~...f#,,,,,,,#,,,S,,,#f...jjjjjjjjB_ggF
-Fgg_Bt~~~~~~....#,d,,,d,#,d,,,d,#...#jjjjjjjmB_ggF
-Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#...#jjjjjjjjB_ggF
-Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#...#########B_ggF
-Fgg_Bt~~~~~~#...####..#####..####...#nnnnnnnnB_ggF
-Fgg_B~~~~~~~#...........f...........#nnnnnnnnB_ggF
-Fgg_B########.......S...9.........4.#nnnlnnnnB_ggF
-Fgg_B~~~~~~~#.......................#nnnnnnnnB_ggF
-Fgg_Bt~~~~~~#h..####..#####..####...#nnndndnnB_ggF
-Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#....nnnnnnnnB_ggF
-Fgg_B~~~~~~~#...#,,,,,,,#,,,,,,,#....nnnnnnnnB_ggF
-Fgg_Bt~~~~~~....#,d,,,d,#,d,,,d,#...#nnnnnnnfB_ggF
-Fgg_B~~~~~~~....#,,,S,,,#,,,,,,,#..h#nnnnnnnnB_ggF
-Fgg_B~~~~~~~#...#,d,,,d,#,d,,,d,#...#nnnnnnlnB_ggF
-Fgg_Bt~~~~~~#...#,,,,,,,#,,,,,,,#...#nnnnnnnnB_ggF
-Fgg_B~~~~~~~#...#,,,,,,l#l,,,,,,#...#nnnnnnnnB_ggF
-Fgg_B########...###..#######..###...#########B_ggF
-Fgg_B.................................h......B_ggF
-Fgg_B...7.....................S..........5...B_ggF
-Fgg_B.......f................................B_ggF
-Fgg_B####..###########......###########..####B_ggF
-Fgg_Boooooooodo#==================#nnnnnnnndnB_ggF
-Fgg_Bododoooooo#==d=====6======d==#nndnnnnnnnB_ggF
-Fgg_Booooooodoo#==================#nnnnnnnnnnB_ggF
-Fgg_Boooooooooo#==================#nnnnnnnnnnB_ggF
-Fgg_BBBBBBBBBBBBBBBBBBB====BBBBBBBBBBBBBBBBBBB_ggF
-Fgg_____________________P______________________ggF
-FppppppppppppppppppppppppppppppppppppppppppppppppF
-Fpppppp|pppp|pppp|pppp|VVVV|pppp|pppp|pppp|ppppppF
-Fpppppp|pppp|pppp|pppp|VVVV|pppp|pppp|pppp|ppppppF
-Fpppppp|pppp|pppp|pppp|pppp|pppp|pppp|pppp|ppppppF
-FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+FgggggggTgggggggggggTgggggggggggTgggggggggTgggggggF
+FggBBWWBBBWWBBBWWBBBWWBBBWWBBBWWBBBWWBBBWWBBBBBBggF
+FggBl,,,#,,,h#,,,l#l,,,#,,,,#,,,l#h,,,#l,,,#mjjBggF
+FggBd,,d#d,,d#d,,d#d,,d#d,,d#d,,d#d,,d#d,,d#jjeBggF
+FTgB,,,,#,,,,#,S,,#,,,,#,,,h#,S,,#,,,,#,,,h#jjjBgTF
+FggBd,,d#d,,d#d,,d#d,,d#d,,d#d,,d#d,,d#d,,d#cjjBggF
+FggB,,,,#,,,,#,,,,#,,,,#,,,,#,,,,#,,,,#,,,,#jjjBggF
+FggB#,,###,,###,,###,,###,,###,,###,,###,,####jBggF
+FggB*...f....u....h....*....f....u....h.....*..BggF
+FggB.1........................G................BggF
+FTgB.................2...S..............3......BgTF
+FggB...........................................BggF
+FggB...u#WW,,#WW,,#*...##~~##^^###..u########..BggF
+FggB....#,,,,#,,,,#....#~~~~#^^^^#...#ebbbbe#..BggF
+FggBh...#d,d,#d,d,#....#t~~~#^^^t#...#bbbbbb#..BggF
+FggB....#,,,,#,S,,#...h#~~~~#^^^^#...#bbcbbb#4.BggF
+FTgB....#d,dl#d,dh#....#t~~~#^^^t#f..#bbbbbb#..BgTF
+FggB..S.##WW###WW##....#~~~~#^^^^#...#bbbbbb#.hBggF
+FggB.9..#l,,,#,,,h#..7.#t~~~#^^^t#.5.#bbb#b##..BggF
+FggB....#d,,d#d,,d#f...#~~~~#^^^^#...#cbb#bb#..BggF
+FggBf...#,,S,#,,,,#....#t~~~#^^^t#..h#bbb#bb#..BggF
+FggB....#d,,d#d,,d#....#~~~~#^^^^#...##L##bb#..BggF
+FTgB....##,,###,,##....##~~##^^###...#ebe#cb#..BgTF
+FggB.........f..............h....f...#bbb#bb#..BggF
+FggB.......8....S............6.......#ebb#bbb..BggF
+FggB*..............*....*...........u#bbc#bbb.uBggF
+FggBBBBBBBBBBBBBBBBB====BBBBBBBBBBBBBBBBBBBBBBBBggF
+FggggggggggggggggggB*==*BgggggggggggggggggggggggggF
+FgggggTgggggTggggTuBB==BBuTggggTgggggTgggggTggggggF
+F_________________________________________________F
+FpppppppppppppppppppppppppppppppppppppppppppppppppF
+Fp|CC|pp|CC|CC|pp|ppppppPVVVVppp|CC|CC|pp|CC|pp|ppF
+Fp|CC|pp|CC|CC|pp|pppppppVVVVppp|CC|CC|pp|CC|pp|ppF
+FpppppppppppppppppppppppppppppppppppppppppppppppppF
+Fp|CC|CC|Tg|pp|CC|CC|TgpTg|CC|pp|Tg|CC|Tg|pp|CC|ppF
+Fp|CC|CC|gg|pp|CC|CC|ggpgg|CC|pp|gg|CC|gg|pp|CC|ppF
+FpppppppppppppppppppppppppppppppppppppppppppppppppF
+FgggggggggggggggggggggggggggggggggggggggggggggggggF
+FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF

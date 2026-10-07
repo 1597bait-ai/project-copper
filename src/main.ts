@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { BALANCE } from './config/balance';
 import { BootScene } from './scenes/BootScene';
 import { EditorScene } from './scenes/EditorScene';
 import { GameScene } from './scenes/GameScene';
@@ -23,10 +24,11 @@ const game = new Phaser.Game({
   scene: [BootScene, MenuScene, GameScene, HudScene, ShiftEndScene, EditorScene],
 });
 
-// Handy for debugging in the browser console and for the automated smoke test.
+// Handy for debugging in the browser console and for the automated smoke test (which reads the
+// tuning numbers from here, so editing src/config/balance.ts never breaks it).
 declare global {
   interface Window {
-    __COPPER__?: { game: Phaser.Game };
+    __COPPER__?: { game: Phaser.Game; balance: typeof BALANCE };
   }
 }
-window.__COPPER__ = { game };
+window.__COPPER__ = { game, balance: BALANCE };

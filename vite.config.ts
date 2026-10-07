@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from 'vite';
 import { viteSingleFile } from 'vite-plugin-singlefile';
 
@@ -21,5 +22,7 @@ export default defineConfig(({ mode }) => {
       copyPublicDir: !single,
     },
     plugins: single ? [stripPwaLinks(), viteSingleFile()] : [],
+    // Only the project's own tests (never scratch files in the gitignored .tmp-* folders).
+    test: { include: ['src/**/*.test.ts'] },
   };
 });

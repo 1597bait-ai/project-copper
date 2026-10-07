@@ -932,8 +932,9 @@ const WALK_FRAMES: FrameSpec[] = [
 ];
 
 const SLEEP_FRAMES: FrameSpec[] = [
+  // Breathing: the head sinks a row (bob), so marks over it stay put.
   { name: 'sleep-0', view: 'down', body: BODY.sleep, bob: 0, closedEyes: true, headDrop: 6 },
-  { name: 'sleep-1', view: 'down', body: BODY.sleep, bob: 0, closedEyes: true, headDrop: 7 },
+  { name: 'sleep-1', view: 'down', body: BODY.sleep, bob: 1, closedEyes: true, headDrop: 6 },
 ];
 
 const stampTpl = (g: Grid, t: Tpl | undefined, dy = 0, flip = false) => t && g.stamp(t.rows, 0, t.y + dy, flip);
@@ -1009,16 +1010,30 @@ function reshape(g: Grid, build: Build, f: FrameSpec): Grid {
   return g;
 }
 
+/** Topmost row with anything drawn (-1 when empty). */
+export function topRow(p: Pix): number {
+  for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (p.get(x, y) !== 0) return y;
+  return -1;
+}
+
+export interface CharacterFrame {
+  name: string;
+  pix: Pix;
+  /** Row where the head starts when not bobbing (walking steps and breathing don't move it). */
+  headRow: number;
+}
+
 /** Every frame of a look's sheet, named for CharacterView (left = right mirrored). */
-export function characterFrames(look: Look): { name: string; pix: Pix }[] {
+export function characterFrames(look: Look): CharacterFrame[] {
   const pal = paletteFor(look);
   const build = look.build ?? 'adult';
   const specs = [...WALK_FRAMES, ...(look.sleeps ? SLEEP_FRAMES : [])];
-  const out: { name: string; pix: Pix }[] = [];
+  const out: CharacterFrame[] = [];
   for (const f of specs) {
     const pix = reshape(composeFrame(look, f), build, f).toPix(pal);
-    out.push({ name: f.name, pix });
-    if (f.view === 'right') out.push({ name: f.name.replace('right', 'left'), pix: pix.flipX() });
+    const headRow = topRow(pix) - f.bob;
+    out.push({ name: f.name, pix, headRow });
+    if (f.view === 'right') out.push({ name: f.name.replace('right', 'left'), pix: pix.flipX(), headRow });
   }
   return out;
 }
@@ -1234,6 +1249,12 @@ export function sackPix(): Pix {
  */
 export const SHEET_PAD = 1;
 
+/** Per-frame data on sheet frames (Phaser frame.customData), read by CharacterView. */
+export interface SheetFrameData {
+  /** Art px from the frame's top edge (border included) to the top of the head. */
+  headRow?: number;
+}
+
 function padded(pix: Pix): Pix {
   return new Pix(pix.w + SHEET_PAD * 2, pix.h + SHEET_PAD * 2).draw(pix, SHEET_PAD, SHEET_PAD);
 }
@@ -1243,7 +1264,8 @@ export const characterArt: ArtModule = {
   paint: (textures: Phaser.Textures.TextureManager) => {
     for (const [key, look] of Object.entries(LOOKS)) {
       const frames = characterFrames(look);
-      addSheet(textures, `${key}_sheet`, frames.map((f) => ({ name: f.name, pix: padded(f.pix) })));
+      const sheet = addSheet(textures, `${key}_sheet`, frames.map((f) => ({ name: f.name, pix: padded(f.pix) })));
+      for (const f of frames) (sheet.get(f.name).customData as SheetFrameData).headRow = SHEET_PAD + f.headRow;
       addTexture(textures, key, frames.find((f) => f.name === 'down-0')!.pix);
       addTexture(textures, `${key}_big`, characterPortrait(look));
     }

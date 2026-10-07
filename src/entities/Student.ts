@@ -164,7 +164,11 @@ export class Student {
     if (sees && this.mind.attention !== 'calm') this.lastSeen = target;
     if (was !== this.mind.attention) {
       if (this.mind.attention === 'calm') this.rest();
-      else if (was === 'calm') this.path = [];
+      else if (was === 'calm') {
+        this.path = [];
+        // Stop chatting: the '?' (or the yell) is what Dalton needs to see now.
+        this.bubble.hide();
+      }
     }
 
     if (why) {
@@ -206,6 +210,19 @@ export class Student {
   /** Word got around: say something about it in `delay` seconds (if they're just hanging out then). */
   queueChatter(delay: number): void {
     this.chatterIn = delay;
+  }
+
+  /**
+   * Puts them at (x, y) looking `facing` (radians), calm, and standing there for `seconds` unless
+   * something catches their eye. For tests and debugging.
+   */
+  standAt(x: number, y: number, facing: number, seconds = Infinity): void {
+    this.body.reset(x, y);
+    Object.assign(this.mind, newMind());
+    this.lastSeen = null;
+    this.facing = facing;
+    this.rest();
+    this.timer = seconds;
   }
 
   /** Shows a speech bubble (for the scene and tests). */

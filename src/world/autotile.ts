@@ -160,14 +160,17 @@ export function frameRect(index: number): { x: number; y: number; w: number; h: 
 /** A stable pseudo-random number for a cell, so the same map always looks the same. */
 export function cellHash(x: number, y: number, salt = 0): number {
   let h = (Math.imul(x | 0, 374761393) + Math.imul(y | 0, 668265263) + Math.imul(salt | 0, 1442695041)) | 0;
-  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  // MurmurHash3's finaliser: mixes every input bit into every output bit, so cells on a regular
+  // grid (parking spaces every 3 tiles) still get unrelated picks.
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
   h ^= h >>> 16;
   return h >>> 0;
 }
 
 /** Picks one of `list` for a cell (e.g. a car colour), the same every time. */
 export function pickForCell<T>(list: readonly T[], x: number, y: number, salt = 0): T {
-  return list[cellHash(x, y, salt) % list.length];
+  return list[Math.floor((cellHash(x, y, salt) / 0x100000000) * list.length)];
 }
 
 const charSalt = (ch: string) => ch.charCodeAt(0) * 7919;

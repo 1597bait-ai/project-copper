@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { PX } from '../art/pixel';
 import { BALANCE, TILE } from '../config/balance';
 import { CHARACTERS, type CharacterDef } from '../config/characters';
 import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
@@ -8,8 +9,9 @@ import type { Door } from '../entities/Door';
 import type { Fixture } from '../entities/Fixture';
 import { Player } from '../entities/Player';
 import { SleepyCoworker, type CoworkerEvent } from '../entities/SleepyCoworker';
+import { drawPixelBox } from '../entities/SpeechBubble';
 import { Student, type StudentYell } from '../entities/Student';
-import { controls } from '../input/Controls';
+import { controls, oncePerKeyEvent } from '../input/Controls';
 import { AlertTimer } from '../systems/alert';
 import { mergeContents, roundMoney, saleValue, type ScrapContents } from '../systems/Bag';
 import { clockText } from '../systems/clock';
@@ -17,6 +19,7 @@ import { besideDesk, coworkerLine, coworkerWakes } from '../systems/coworker';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
 import { sfx } from '../systems/sfx';
 import { chatterDelays, hearsYell } from '../systems/studentMind';
+import { DEPTH } from '../ui/depth';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { parseMap } from '../world/mapText';
 import { DEFAULT_MAP } from '../world/maps';
@@ -87,7 +90,8 @@ export class GameScene extends Phaser.Scene {
   private characterId = 'dalton';
   /** Custom map text, or undefined for the built-in map. */
   mapText: string | undefined;
-  private elapsed = 0;
+  /** Seconds of shift played so far (in-game time: tests wait on this rather than the wall clock). */
+  elapsed = 0;
   private earned = 0;
   private warnings = 0;
   private sold: ScrapContents = {};
@@ -180,7 +184,7 @@ export class GameScene extends Phaser.Scene {
       this.physics.add.collider(body, this.world.solids);
     }
 
-    this.channelBar = this.add.graphics().setDepth(25);
+    this.channelBar = this.add.graphics().setDepth(DEPTH.channelBar);
 
     const cam = this.cameras.main;
     cam.startFollow(this.player.zone, true, 0.12, 0.12);
@@ -192,9 +196,10 @@ export class GameScene extends Phaser.Scene {
     const kb = this.input.keyboard!;
     this.keys = kb.addKeys('W,A,S,D,UP,DOWN,LEFT,RIGHT') as Record<string, Phaser.Input.Keyboard.Key>;
     kb.addCapture('SPACE,UP,DOWN,LEFT,RIGHT');
-    // Presses are event-driven so quick taps are never lost, even at low frame rates.
+    // Presses are event-driven so quick taps are never lost, even at low frame rates (and handled
+    // once each: see oncePerKeyEvent).
     const bind = (keys: string[], press: 'action' | 'ability' | 'pause') =>
-      keys.forEach((k) => kb.on(`keydown-${k}`, (e: KeyboardEvent) => !e.repeat && controls.press(press)));
+      keys.forEach((k) => kb.on(`keydown-${k}`, oncePerKeyEvent((e: KeyboardEvent) => !e.repeat && controls.press(press))));
     bind(['E', 'SPACE', 'ENTER'], 'action');
     bind(['Q', 'SHIFT'], 'ability');
     bind(['ESC', 'P'], 'pause');
@@ -268,10 +273,8 @@ export class GameScene extends Phaser.Scene {
 
     // Once fired, nobody walks off during the "you're fired" beat.
     if (!this.over) {
-      if (this.alert.tick(dt)) {
-        sfx.calm();
-        this.toast('The students calmed down. High alert is over.', '#9fd8ff');
-      }
+      // The HUD's HIGH ALERT banner counts down and goes away; a sound marks the end.
+      if (this.alert.tick(dt)) sfx.calm();
       this.updateStudents(dt);
       this.updateCoworker(dt);
     }
@@ -396,9 +399,10 @@ export class GameScene extends Phaser.Scene {
   // ---- students ----------------------------------------------------------
 
   private updateStudents(dt: number) {
-    const ctx = { highAlert: this.alert.active };
     for (const s of this.students) {
-      const yell = s.update(dt, this.player, ctx);
+      // Read the alert per student: a yell earlier in this loop can start it, and the ones after
+      // must already be on alert (or they'd drop the chatter it just queued for them).
+      const yell = s.update(dt, this.player, { highAlert: this.alert.active });
       if (yell) this.onYell(s, yell);
     }
   }
@@ -502,7 +506,8 @@ export class GameScene extends Phaser.Scene {
         this.earned = roundMoney(this.earned + b.hushMoney);
         this.hushMoney = roundMoney(this.hushMoney + b.hushMoney);
         sfx.coin();
-        this.floatText(c.x, c.y - 70, coworkerLine('+{money}', b.hushMoney), '#7ddc7d', 1600);
+        // Over Dalton, who gets the money (the coworker's head has his '$' emote).
+        this.floatText(this.player.x, this.player.y + this.player.view.headTop - 30, coworkerLine('+{money}', b.hushMoney), '#7ddc7d', 1600);
         break;
       case 'gone':
         c.destroy();
@@ -652,16 +657,25 @@ export class GameScene extends Phaser.Scene {
     for (const s of this.students) s.syncView(time, view);
     this.coworker?.syncView(time);
 
+    this.drawChannelBar();
+  }
+
+  /** The scrap / unlock progress bar over Dalton's head, drawn like a Gen 3 HP bar on the art pixel grid. */
+  private drawChannelBar() {
     const g = this.channelBar;
     g.clear();
     const ch = this.player.channel;
-    if (ch) {
-      const w = 84;
-      const x = this.player.x - w / 2;
-      const y = this.player.y - 58;
-      g.fillStyle(0x12151c, 0.85).fillRoundedRect(x - 4, y - 4, w + 8, 20, 8);
-      g.fillStyle(ch.kind === 'scrap' ? 0xe8914a : 0x7ddc7d, 1).fillRoundedRect(x, y, w * Math.min(1, ch.elapsed / ch.duration), 12, 5);
-    }
+    if (!ch) return;
+    const P = PX;
+    const w = 24 * P;
+    const h = 6 * P;
+    const x = Math.round((this.player.x - w / 2) / P) * P;
+    const y = Math.round((this.player.y + this.player.view.headTop - 8 * P) / P) * P;
+    drawPixelBox(g, x, y, w, h);
+    const inner = w - 4 * P;
+    g.fillStyle(0x485060, 1).fillRect(x + 2 * P, y + 2 * P, inner, 2 * P);
+    const fill = Math.round((inner * Math.min(1, ch.elapsed / ch.duration)) / P) * P;
+    g.fillStyle(ch.kind === 'scrap' ? 0xf0903a : 0x58c858, 1).fillRect(x + 2 * P, y + 2 * P, fill, 2 * P);
   }
 
   toast(text: string, color = '#f6f1e5', duration = 2600): void {
@@ -674,7 +688,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   floatText(x: number, y: number, text: string, color: string, duration = 1200): void {
-    const t = this.add.text(x, y, text, textStyle(30, color)).setOrigin(0.5).setDepth(30);
+    const t = this.add.text(x, y, text, textStyle(30, color)).setOrigin(0.5).setDepth(DEPTH.floatText);
     this.tweens.add({ targets: t, y: y - 70, alpha: { from: 1, to: 0 }, ease: 'Cubic.Out', duration, onComplete: () => t.destroy() });
   }
 

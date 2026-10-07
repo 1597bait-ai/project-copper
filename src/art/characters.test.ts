@@ -68,6 +68,18 @@ describe('character art', () => {
     });
   }
 
+  it('knows where the head starts: steady while walking or breathing, lower when slumped asleep', () => {
+    const rows = (k: string) => Object.fromEntries(characterFrames(LOOKS[k]).map((f) => [f.name, f.headRow]));
+    for (const k of Object.keys(LOOKS)) {
+      const r = rows(k);
+      for (const f of FACINGS) expect([r[`${f}-1`], r[`${f}-2`], r[`${f}-yell`]], `${k} ${f}`).toEqual([r[`${f}-0`], r[`${f}-0`], r[`${f}-0`]]);
+      expect(r['down-0'], k).toBeLessThanOrEqual(1);
+    }
+    const sleepy = rows('sleepy_coworker');
+    expect(sleepy['sleep-0']).toBe(sleepy['sleep-1']);
+    expect(sleepy['sleep-0']).toBeGreaterThan(sleepy['down-0'] + 4);
+  });
+
   it('sizes people by build: kids smaller, Mr. Gravy bigger', () => {
     const size = (k: string) => characterFrames(LOOKS[k])[0].pix;
     expect([size('dalton').w, size('dalton').h]).toEqual([16, 24]);

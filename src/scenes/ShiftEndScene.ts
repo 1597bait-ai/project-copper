@@ -3,8 +3,9 @@ import { BALANCE } from '../config/balance';
 import { CHARACTERS } from '../config/characters';
 import { saleValue } from '../systems/Bag';
 import { loadSave, updateSave } from '../systems/save';
-import { Button, COLORS, fitColumn, isPortrait, money, textStyle } from '../ui/theme';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, fitColumn, fitWidth, isPortrait, money, textStyle } from '../ui/theme';
 import { GameScene, type ShiftSummary } from './GameScene';
+import { addSchoolBackdrop } from './MenuScene';
 
 // Summaries already written to the save (the scene restarts on resize; don't count a shift twice).
 const recorded = new WeakSet<ShiftSummary>();
@@ -37,61 +38,78 @@ export class ShiftEndScene extends Phaser.Scene {
     const s = this.summary;
     const portrait = isPortrait(this.scale);
     if (!portrait) this.cameras.main.setZoom(1).setScroll(0, 0);
-    const { width: W, height: H } = portrait ? fitColumn(this, 1080, 1700) : { width: this.scale.width, height: this.scale.height };
+    const columnH = 1560;
+    const { width: W, height: H } = portrait ? fitColumn(this, 1080, columnH) : { width: this.scale.width, height: this.scale.height };
     const cx = W / 2;
-    const top = portrait ? Math.max(0, (H - 1700) / 2) : 0;
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x1d2230, 0x1d2230, 0x0f1117, 0x0f1117, 1).fillRect(0, 0, W, H);
+    const top = portrait ? Math.max(0, (H - columnH) / 2) : 0;
+    addSchoolBackdrop(this, W, H);
 
     const headline = s.fired ? "YOU'RE FIRED!" : 'SHIFT OVER';
     this.add
-      .text(cx, top + 70, headline, textStyle(portrait ? 96 : 120, s.fired ? COLORS.bad : COLORS.good, { strokeThickness: 16 }))
-      .setOrigin(0.5, 0)
-      .setShadow(0, 8, '#000', 0, true, true);
+      .text(cx, top + 56, headline, textStyle(portrait ? 112 : 128, s.fired ? COLORS.bad : COLORS.good, { fontStyle: '700', strokeThickness: 14, shadow: { offsetX: 8, offsetY: 8, color: COLORS.ink, blur: 0, stroke: true, fill: true } }))
+      .setOrigin(0.5, 0);
     const sub = s.fired
       ? 'Mr. Gravy caught you three times. Clean out your locker.'
       : `${CHARACTERS[s.character]?.name ?? 'You'} clocked out at 3:00 PM.`;
-    this.add.text(cx, top + (portrait ? 200 : 220), sub, textStyle(32, COLORS.muted, { align: 'center', wordWrap: { width: 960 } })).setOrigin(0.5, 0);
+    this.add.text(cx, top + (portrait ? 196 : 214), sub, textStyle(portrait ? 40 : 34, COLORS.text, { align: 'center', wordWrap: { width: 960 } })).setOrigin(0.5, 0);
 
-    const art = s.fired ? 'mr_gravy_big' : 'van_big';
-    if (portrait) {
-      this.add.image(cx, top + 430, art).setRotation(s.fired ? -Math.PI / 2 : Math.PI / 2).setScale(s.fired ? 1 : 0.5);
-    } else {
-      this.add.image(cx - 520, 520, art).setRotation(s.fired ? -Math.PI / 2 : 0).setScale(s.fired ? 1.1 : 0.7);
-    }
-
+    // The report, in a window.
     const lines: [string, string, string?][] = [
-      ['Earned this shift', money(s.earned), COLORS.copper],
-      ['Warnings', `${s.warnings} / ${BALANCE.warningsUntilFired}`, s.warnings ? COLORS.bad : COLORS.good],
+      ['Earned this shift', money(s.earned), COLORS.boxCopper],
+      ['Warnings', `${s.warnings} / ${BALANCE.warningsUntilFired}`, s.warnings ? COLORS.boxBad : COLORS.boxGood],
     ];
+    if (s.hushMoney > 0) lines.push(['Hush money (sleepy coworker)', money(s.hushMoney), COLORS.boxGood]);
     const lostValue = saleValue(s.lost);
-    if (lostValue > 0) lines.push(['Scrap lost (confiscated / unsold)', money(lostValue), COLORS.bad]);
-    lines.push(['Best shift', money(this.best) + (this.newBest ? '  NEW!' : ''), this.newBest ? COLORS.warn : COLORS.text]);
+    if (lostValue > 0) lines.push(['Scrap lost (confiscated / unsold)', money(lostValue), COLORS.boxBad]);
+    lines.push(['Best shift', money(this.best) + (this.newBest ? '  NEW!' : ''), this.newBest ? COLORS.boxCopper : COLORS.boxText]);
 
-    const left = portrait ? cx - 460 : cx - 280;
-    const right = portrait ? cx + 460 : cx + 560;
-    let y = portrait ? top + 640 : 330;
+    const winW = portrait ? 980 : 1100;
+    const winX = portrait ? cx - winW / 2 : cx - 380;
+    const winY = portrait ? top + 560 : 300;
+    const left = winX + 50;
+    const right = winX + winW - 50;
+    // Portrait phones show this column small: bigger text.
+    const rowH = portrait ? 84 : 66;
+    const win = this.add.graphics();
+    let y = winY + 58;
     for (const [label, value, color] of lines) {
-      this.add.text(left, y, label, textStyle(portrait ? 30 : 34)).setOrigin(0, 0.5);
-      this.add.text(right, y, value, textStyle(40, color ?? COLORS.text)).setOrigin(1, 0.5);
-      y += portrait ? 80 : 70;
+      const v = this.add.text(right, y, value, textStyle(portrait ? 46 : 42, color ?? COLORS.boxText, { fontStyle: '700' })).setOrigin(1, 0.5);
+      fitWidth(this.add.text(left, y, label, textStyle(portrait ? 38 : 34, COLORS.boxText)).setOrigin(0, 0.5), right - left - v.width - 30);
+      y += rowH;
     }
     const sold = GameScene.soldLines(s.sold);
-    this.add
-      .text(left, y + 10, sold.length ? 'Sold:  ' + sold.join('   ·   ') : 'Sold: nothing. Mr. Gravy is proud of you.', textStyle(24, COLORS.muted, { wordWrap: { width: right - left } }))
+    const soldText = this.add
+      .text(left, y - 6, sold.length ? 'Sold:  ' + sold.join('   ·   ') : 'Sold: nothing. Mr. Gravy is proud of you.', textStyle(portrait ? 32 : 26, COLORS.boxMuted, { wordWrap: { width: right - left } }))
       .setOrigin(0, 0);
+    const winH = soldText.y + soldText.height + 40 - winY;
+    drawBox(win, winX, winY, winW, winH, { unit: 6 });
+    win.setDepth(-1);
+
+    // Mr. Gravy (fired) or the van (made it), upright: the van is drawn from the side.
+    const art = s.fired ? 'mr_gravy_big' : 'van_big';
+    if (portrait) {
+      const fw = s.fired ? 280 : 400;
+      drawBox(this.add.graphics(), cx - fw / 2, top + 296, fw, 236, { unit: 6, fill: 0xdfe9f5 });
+      this.add.image(cx, top + 414, art).setScale(s.fired ? 1 : 0.66);
+    } else {
+      const ax = winX - 290;
+      const ay = winY + winH / 2;
+      const frame = this.add.graphics();
+      drawBox(frame, ax - 220, ay - 170, 440, 340, { unit: 6, fill: 0xdfe9f5 });
+      this.add.image(ax, ay, art).setScale(s.fired ? 1.4 : 0.78);
+    }
 
     const again = s.fired ? 'TRY AGAIN' : 'NEXT SHIFT';
-    const by = portrait ? y + 240 : H - 150;
+    const by = portrait ? winY + winH + 120 : Math.min(H - 100, Math.max(winY + winH, 640) + 130);
     const replay = () => this.scene.start('Game', { character: s.character, mapText: s.mapText });
-    const grey = { width: 420, height: 104, fontSize: 44, fill: 0x3d4558 };
+    const grey = { ...BUTTON_SECONDARY, width: 420, height: 104, fontSize: 44 };
     if (s.mapText && !portrait) {
       // Played a map from the editor: offer the way straight back to it.
-      new Button(this, cx - 460, by, again, replay, { width: 400, height: 104, fontSize: 44 });
+      new Button(this, cx - 460, by, again, replay, { ...BUTTON_PRIMARY, width: 400, height: 104, fontSize: 44 }).setSelected(true);
       new Button(this, cx, by, 'EDIT MAP', () => this.scene.start('Editor', { mapText: s.mapText }), { ...grey, width: 400 });
       new Button(this, cx + 460, by, 'MENU', () => this.scene.start('Menu'), { ...grey, width: 400 });
     } else {
-      new Button(this, cx - 240, by, again, replay, { width: 420, height: 104, fontSize: 44 });
+      new Button(this, cx - 240, by, again, replay, { ...BUTTON_PRIMARY, width: 420, height: 104, fontSize: 44 }).setSelected(true);
       new Button(this, cx + 240, by, 'MENU', () => this.scene.start('Menu'), grey);
       if (s.mapText) new Button(this, cx, by + 130, 'EDIT MAP', () => this.scene.start('Editor', { mapText: s.mapText }), { ...grey, width: 900 });
     }
