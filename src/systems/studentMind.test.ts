@@ -9,8 +9,10 @@ import {
   newMind,
   noticeSeconds,
   think,
+  yellRaisesAlarm,
   type MindTuning,
   type StudentSenses,
+  type Yell,
 } from './studentMind';
 
 const T: MindTuning = {
@@ -34,7 +36,7 @@ const senses = (over: Partial<StudentSenses> = {}): StudentSenses => ({
 
 /** Runs the mind for `seconds` with the same senses; returns every yell it started. */
 function run(m: ReturnType<typeof newMind>, s: StudentSenses, seconds: number) {
-  const yells = [];
+  const yells: Yell[] = [];
   for (let t = 0; t < seconds - 1e-9; t += DT) {
     const y = think(m, s, DT, T);
     if (y) yells.push(y);
@@ -116,12 +118,24 @@ describe('student mind: yelling and following', () => {
     expect(m.attention).toBe('follow');
   });
 
-  it('yells again every few seconds while it can see him (scrap or not)', () => {
+  it('yells again every few seconds while it can see him with scrap', () => {
     const m = newMind();
     think(m, senses({ redHanded: true }), DT, T);
     // 1s of yelling, then following: the next yell comes reyellSeconds after the first.
-    const yells = run(m, senses(), 8.5);
+    const yells = run(m, senses({ redHanded: true }), 8.5);
     expect(yells).toEqual(['again', 'again']);
+  });
+
+  it("doesn't yell again at an empty-handed Dalton: stares, then gives up even while it can see him", () => {
+    const m = newMind();
+    think(m, senses({ redHanded: true }), DT, T);
+    // He sold the scrap (or never had any: a 'suspect' yell on high alert).
+    expect(run(m, senses({ highAlert: true }), 5.5)).toEqual([]);
+    expect(m.attention).toBe('follow');
+    expect(m.lostFor).toBeGreaterThan(0);
+    run(m, senses({ highAlert: true }), 0.6);
+    expect(m.attention).toBe('calm');
+    expect(m.ignore).toBeGreaterThan(7);
   });
 
   it("doesn't yell while it can't see him, but yells as soon as it spots him again", () => {
@@ -129,7 +143,7 @@ describe('student mind: yelling and following', () => {
     think(m, senses({ redHanded: true }), DT, T);
     expect(run(m, senses({ sees: false }), 5)).toEqual([]);
     expect(m.attention).toBe('follow');
-    expect(think(m, senses(), DT, T)).toBe('again');
+    expect(think(m, senses({ redHanded: true }), DT, T)).toBe('again');
   });
 
   it('gives up after losing him for a while, then ignores him', () => {
@@ -144,13 +158,36 @@ describe('student mind: yelling and following', () => {
     expect(run(m, senses({ redHanded: true }), 5)).toEqual([]);
   });
 
-  it('a glimpse of him resets the give-up clock', () => {
+  it('a glimpse of him with scrap resets the give-up clock; empty-handed it does not', () => {
     const m = newMind();
     think(m, senses({ redHanded: true }), DT, T);
     run(m, senses({ sees: false }), 5);
-    think(m, senses(), DT, T);
+    think(m, senses({ redHanded: true }), DT, T);
     run(m, senses({ sees: false }), 5);
     expect(m.attention).not.toBe('calm');
+    think(m, senses(), DT, T);
+    run(m, senses({ sees: false }), 1);
+    expect(m.attention).toBe('calm');
+  });
+
+  it('loses interest when it gets a good look at him in disguise', () => {
+    for (const start of [{ redHanded: true }, { highAlert: true, distance: 0 }]) {
+      const m = newMind();
+      run(m, senses(start), 0.5);
+      expect(m.attention).not.toBe('calm');
+      expect(think(m, senses({ sees: false, fooled: true, redHanded: true }), DT, T)).toBe(null);
+      expect(m.attention).toBe('calm');
+      // ...and keeps ignoring him for a while after the disguise wears off.
+      expect(m.ignore).toBeGreaterThan(7);
+      expect(run(m, senses({ redHanded: true }), 5)).toEqual([]);
+    }
+  });
+
+  it('a calm student is not bothered by a student who is really Dalton', () => {
+    const m = newMind();
+    expect(run(m, senses({ sees: false, fooled: true, highAlert: true }), 3)).toEqual([]);
+    expect(m.attention).toBe('calm');
+    expect(m.ignore).toBe(0);
   });
 
   it('calms down when Mr. Gravy catches him', () => {
@@ -184,6 +221,21 @@ describe('danger from students', () => {
 });
 
 describe('yelling for Mr. Gravy', () => {
+  it('only a sighting of scrap counts as a report that (re)starts the high alert', () => {
+    expect(yellRaisesAlarm('redHanded')).toBe(true);
+    expect(yellRaisesAlarm('again')).toBe(true);
+    expect(yellRaisesAlarm('suspect')).toBe(false);
+  });
+
+  it("can't keep the high alert going on an empty-handed Dalton", () => {
+    // One report, then he walks around empty-handed in plain sight of a student on high alert.
+    const m = newMind();
+    const yells = run(m, senses({ highAlert: true, distance: 0.5 }), 60);
+    // They may recognise him now and then, but none of it is a report.
+    expect(yells.length).toBeGreaterThan(0);
+    expect(yells.every((y) => !yellRaisesAlarm(y))).toBe(true);
+  });
+
   it('reaches him in a straight line up to the hearing range', () => {
     expect(hearsYell({ x: 0, y: 0 }, { x: 300, y: 400 }, 500)).toBe(true);
     expect(hearsYell({ x: 0, y: 0 }, { x: 300, y: 401 }, 500)).toBe(false);

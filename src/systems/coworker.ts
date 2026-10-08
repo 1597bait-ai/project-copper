@@ -22,12 +22,16 @@ const BESIDE: readonly (readonly [number, number])[] = [
 ];
 
 /**
- * The open tile beside `desk` (tile coordinates) where he appears, avoiding Dalton's tile when
- * there's any other choice (he isn't solid, but standing inside Dalton would look silly).
+ * The open tile beside `desk` (tile coordinates) where he appears. Keeps clear of Dalton's tile
+ * (`avoid`) and the tiles straight above, below and beside it when there's any other choice: he
+ * isn't solid, and people are taller than a tile, so right above or below Dalton the two of them
+ * would overlap and his '!' would look like Dalton's.
  */
 export function besideDesk(grid: Grid, desk: Point, avoid: Point | null): Point | null {
   const open = BESIDE.map(([dx, dy]) => ({ x: desk.x + dx, y: desk.y + dy })).filter((t) => !grid.blocked(t.x, t.y));
-  return open.find((t) => !avoid || t.x !== avoid.x || t.y !== avoid.y) ?? open[0] ?? null;
+  const steps = (t: Point) => (avoid ? Math.abs(t.x - avoid.x) + Math.abs(t.y - avoid.y) : Infinity);
+  const diagonal = (t: Point) => avoid !== null && Math.abs(t.x - avoid.x) === 1 && Math.abs(t.y - avoid.y) === 1;
+  return open.find((t) => steps(t) > 1 || diagonal(t)) ?? open.find((t) => steps(t) > 0) ?? open[0] ?? null;
 }
 
 /**

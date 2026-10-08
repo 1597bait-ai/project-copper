@@ -2,9 +2,9 @@
 // tested; src/entities/Student.ts turns it into walking, turning and speech bubbles.
 //
 //   calm (hanging out) --sees him with scrap--> yell --> follow --(yells again every few seconds
-//     while they can see him)--> loses him for a while --> calm, ignoring him for a bit
+//     while they can see him with scrap)--> no scrap in sight for a while --> calm, ignoring him for a bit
 //   calm --on high alert, sees him empty-handed--> notice ('?' fills, faster up close) --full--> yell
-//   Mr. Gravy catches him: everyone calms down.
+//   Mr. Gravy catches him, or he's in disguise when they look: they calm down.
 
 import type { Point } from './pathfinding';
 
@@ -23,13 +23,19 @@ export interface StudentMind {
   yellLeft: number;
   /** Seconds until they may yell again while following. */
   reyellIn: number;
-  /** Seconds since they last saw him while following. */
+  /**
+   * Seconds since they last saw him red-handed while yelling or following. Seeing him empty-handed
+   * doesn't count: they stare with a '?' and give up all the same, so an innocent Dalton can't
+   * keep a follower (and the school's high alert) going forever.
+   */
   lostFor: number;
 }
 
 export interface StudentSenses {
   /** He's inside their vision cone, in plain sight (not hidden behind a wall or passing as a student). */
   sees: boolean;
+  /** He's inside their vision cone but passing as a student (Dalton's disguise): nothing to see here. */
+  fooled?: boolean;
   /** He's carrying scrap or scrapping: the things that get him in trouble. */
   redHanded: boolean;
   /** Word got around: every student is watching for him. */
@@ -60,16 +66,22 @@ export function noticeSeconds(distance: number, t: MindTuning): number {
 /** Advances the mind by `dt` seconds. Returns why they start yelling this frame, or null. */
 export function think(m: StudentMind, s: StudentSenses, dt: number, t: MindTuning): Yell | null {
   m.ignore = Math.max(0, m.ignore - dt);
+  // Whoever was after him takes a good look and sees just another kid: they lose interest.
+  if (s.fooled && m.attention !== 'calm') {
+    calmDown(m, t.ignoreSeconds);
+    return null;
+  }
+  const caught = s.sees && s.redHanded;
   switch (m.attention) {
     case 'yell':
-      m.lostFor = s.sees ? 0 : m.lostFor + dt;
+      m.lostFor = caught ? 0 : m.lostFor + dt;
       m.reyellIn -= dt;
       if ((m.yellLeft -= dt) <= 0) m.attention = 'follow';
       return null;
     case 'follow':
       // The re-yell clock runs even while he's out of sight, so spotting him again sets them off at once.
       m.reyellIn -= dt;
-      if (s.sees) {
+      if (caught) {
         m.lostFor = 0;
         if (m.reyellIn <= 0) return startYell(m, t, 'again');
       } else if ((m.lostFor += dt) >= t.followGiveUpSeconds) {
@@ -108,6 +120,15 @@ export function calmDown(m: StudentMind, ignoreSeconds: number): void {
   m.yellLeft = 0;
   m.lostFor = 0;
   m.ignore = Math.max(m.ignore, ignoreSeconds);
+}
+
+/**
+ * Whether a yell that reaches Mr. Gravy counts as a report that (re)starts the school's high alert:
+ * only when they saw him with scrap. An empty-handed Dalton recognised on high alert still gets
+ * Mr. Gravy running over, but doesn't keep the alert going.
+ */
+export function yellRaisesAlarm(why: Yell): boolean {
+  return why !== 'suspect';
 }
 
 /** How much this student lights up the HUD's red danger edge (0-1). */

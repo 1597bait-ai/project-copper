@@ -65,9 +65,12 @@ export class Player {
     return this.ability?.id === 'look_busy' && this.abilityLeft > 0;
   }
 
-  /** Dressed as a student: other students don't give him a second look, even on high alert. */
+  /**
+   * Dressed as a student: other students don't give him a second look, even on high alert. Not
+   * while he's hammering at a fixture, though: the disguise only covers carrying.
+   */
   get blendsIn(): boolean {
-    return this.disguised;
+    return this.disguised && !this.isScrapping;
   }
 
   /** Board: the boss "only sees PC if they are carrying scrap" — or caught in the act of scrapping. */
@@ -89,6 +92,8 @@ export class Player {
   /** Returns true if the ability fired. */
   useAbility(): boolean {
     if (!this.ability || this.abilityCooldown > 0) return false;
+    // Board: Dalton's disguise only covers carrying, so it can't be put on mid-scrap (see startChannel).
+    if (this.ability.id === 'student_disguise' && this.isScrapping) return false;
     this.abilityLeft = this.ability.duration;
     this.abilityCooldown = this.ability.cooldown;
     this.refreshLook();

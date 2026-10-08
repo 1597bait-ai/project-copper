@@ -158,13 +158,18 @@ export class Student {
     const target = { x: player.x, y: player.y };
     const cone = this.visionCone;
     const dist = Phaser.Math.Distance.Between(this.x, this.y, target.x, target.y);
-    const sees = !player.blendsIn && inCone(this.world.sight, cone, target);
+    const inView = inCone(this.world.sight, cone, target);
+    const sees = inView && !player.blendsIn;
+    const fooled = inView && player.blendsIn;
     const was = this.mind.attention;
-    const why = think(this.mind, { sees, redHanded: player.suspicious, highAlert: ctx.highAlert, distance: dist / cone.range }, dt, TUNING);
+    const why = think(this.mind, { sees, fooled, redHanded: player.suspicious, highAlert: ctx.highAlert, distance: dist / cone.range }, dt, TUNING);
     if (sees && this.mind.attention !== 'calm') this.lastSeen = target;
     if (was !== this.mind.attention) {
-      if (this.mind.attention === 'calm') this.rest();
-      else if (was === 'calm') {
+      if (this.mind.attention === 'calm') {
+        this.rest();
+        // The disguise worked: they had a good look and lost interest.
+        if (fooled) this.bubble.say(pick(STUDENT_LINES.fooled), CHATTER_SECONDS);
+      } else if (was === 'calm') {
         this.path = [];
         // Stop chatting: the '?' (or the yell) is what Dalton needs to see now.
         this.bubble.hide();

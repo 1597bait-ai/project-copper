@@ -30,6 +30,8 @@ export const STUDENT_LINES = {
   again: ["He's over here!", 'MR. GRAVY! This way!', "He's getting away!", 'Over HERE!'],
   /** Mr. Gravy just caught you. */
   busted: ['Busted!', 'Ha! Told you!', 'Ooooh, busted!'],
+  /** Were after you, then saw you in disguise ("Act Like a Student"). */
+  fooled: ['Huh? Just a kid.', 'Wait... where did he go?', 'Must have been someone else.'],
   /** Talking among themselves on high alert. */
   chatter: [
     "Did you hear? Someone's stealing copper!",

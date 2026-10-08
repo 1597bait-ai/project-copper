@@ -18,7 +18,7 @@ import { clockText } from '../systems/clock';
 import { besideDesk, coworkerLine, coworkerWakes } from '../systems/coworker';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
 import { sfx } from '../systems/sfx';
-import { chatterDelays, hearsYell } from '../systems/studentMind';
+import { chatterDelays, hearsYell, yellRaisesAlarm } from '../systems/studentMind';
 import { DEPTH } from '../ui/depth';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { parseMap } from '../world/mapText';
@@ -104,6 +104,11 @@ export class GameScene extends Phaser.Scene {
   private wasChasing = false;
   /** Word got around after a student's yell reached Mr. Gravy: every student is on high alert. */
   readonly alert = new AlertTimer();
+  /**
+   * Set by the HUD while its dialog box is up. The action key / button then moves the dialog along
+   * (the 'dialogNext' event) instead of scrapping, like the A button in the GBA games.
+   */
+  dialogOpen = false;
   /** The sleepy coworker while he's around (one at a time). */
   coworker: SleepyCoworker | null = null;
   /**
@@ -147,6 +152,7 @@ export class GameScene extends Phaser.Scene {
     this.coworker = null;
     this.coworkerChance = BALANCE.sleepyCoworker.chance;
     this.coworkersMet = 0;
+    this.dialogOpen = false;
     this.hushMoney = 0;
     controls.reset();
   }
@@ -230,6 +236,11 @@ export class GameScene extends Phaser.Scene {
     const dt = deltaMs / 1000;
 
     const input = this.readInput();
+    if (input.action && this.dialogOpen) {
+      // Reading, not working: one press, one owner (the scrap next to the coworker stays put).
+      input.action = false;
+      this.events.emit('dialogNext');
+    }
     if (input.pause) {
       this.pauseGame();
       return;
@@ -373,6 +384,8 @@ export class GameScene extends Phaser.Scene {
     this.over = true;
     this.freezeActors();
     if (!fired && !this.player.bag.isEmpty) mergeContents(this.lost, this.player.bag.takeAll());
+    // The bell rang mid-conversation: the coworker still pays up (a fired Dalton doesn't get paid).
+    if (!fired && this.coworker && !this.coworker.paid) this.payHushMoney();
     fired ? sfx.fired() : sfx.shiftOver();
     const summary: ShiftSummary = {
       fired,
@@ -409,8 +422,8 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * A student yelled for Mr. Gravy. If he's close enough to hear it, he sprints to where they saw
-   * Dalton (every yell he hears moves him to the newest spot), and that counts as a report: word
-   * gets around and every student goes on high alert.
+   * Dalton (every yell he hears moves him to the newest spot). If they saw him with scrap, that
+   * counts as a report: word gets around and every student goes on high alert (or it restarts).
    */
   private onYell(s: Student, yell: StudentYell) {
     sfx.yell();
@@ -426,7 +439,7 @@ export class GameScene extends Phaser.Scene {
       // Short enough for one line on a portrait phone: the HUD stacks toasts one line apart.
       this.throttledToast('heard', `${NPCS.mr_gravy.name} heard! He's on his way!`, '#ff8a5a');
     }
-    this.raiseAlarm(s);
+    if (yellRaisesAlarm(yell.why)) this.raiseAlarm(s);
   }
 
   /**
@@ -503,8 +516,7 @@ export class GameScene extends Phaser.Scene {
         break;
       case 'bribe':
         say(coworkerLine(COWORKER_LINES.bribe, b.hushMoney), b.lineSeconds[1]);
-        this.earned = roundMoney(this.earned + b.hushMoney);
-        this.hushMoney = roundMoney(this.hushMoney + b.hushMoney);
+        this.payHushMoney();
         sfx.coin();
         // Over Dalton, who gets the money (the coworker's head has his '$' emote).
         this.floatText(this.player.x, this.player.y + this.player.view.headTop - 30, coworkerLine('+{money}', b.hushMoney), '#7ddc7d', 1600);
@@ -514,6 +526,12 @@ export class GameScene extends Phaser.Scene {
         this.coworker = null;
         break;
     }
+  }
+
+  private payHushMoney() {
+    const pay = BALANCE.sleepyCoworker.hushMoney;
+    this.earned = roundMoney(this.earned + pay);
+    this.hushMoney = roundMoney(this.hushMoney + pay);
   }
 
   /**
@@ -742,7 +760,11 @@ export class GameScene extends Phaser.Scene {
       : null;
 
     h.promptBad = false;
-    if (p.channel) {
+    if (this.dialogOpen) {
+      // The action button reads the dialog on (the box itself shows the blinking arrow).
+      h.action = 'NEXT';
+      h.prompt = null;
+    } else if (p.channel) {
       h.action = 'STOP';
       h.prompt = p.channel.kind === 'scrap' ? 'Scrapping… (move to stop)' : 'Unlocking… (move to stop)';
     } else if (this.target?.kind === 'door') {

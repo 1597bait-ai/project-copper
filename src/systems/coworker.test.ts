@@ -48,6 +48,20 @@ describe('sleepy coworker: where he crawls out', () => {
     expect(besideDesk(grid, desk, { x: 3, y: 3 })).toEqual({ x: 2, y: 2 });
   });
 
+  it('keeps out from right under (or over) Dalton when there is another way out', () => {
+    // A desk in a corner: wall below and to the right, Dalton scrapping from the left.
+    const corner = Grid.fromRows(['#####', '#...#', '#..##', '#####'], 64);
+    const at = { x: 3, y: 2 };
+    // Not below Dalton (2,3 is a wall here anyway) nor at 2,1 straight above him: the diagonal 3,1.
+    expect(besideDesk(corner, at, { x: 2, y: 2 })).toEqual({ x: 3, y: 1 });
+    // With a free tile diagonal to Dalton, that one.
+    const open = Grid.fromRows(['####', '#..#', '#..#', '####'], 64);
+    expect(besideDesk(open, { x: 2, y: 1 }, { x: 1, y: 1 })).toEqual({ x: 2, y: 2 });
+    // When the only other tile is right below Dalton: better there than on top of him.
+    const tight = Grid.fromRows(['####', '#.##', '#.##', '####'], 64);
+    expect(besideDesk(tight, { x: 2, y: 1 }, { x: 1, y: 1 })).toEqual({ x: 1, y: 2 });
+  });
+
   it('uses whatever is open next to a desk against a wall', () => {
     const tight = Grid.fromRows(['#####', '#.#.#', '#####'], 64);
     expect(besideDesk(tight, { x: 2, y: 1 }, null)).toEqual({ x: 1, y: 1 });

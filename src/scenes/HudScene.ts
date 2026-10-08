@@ -175,11 +175,14 @@ export class HudScene extends Phaser.Scene {
     this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
     this.gameScene.events.on('toast', this.showToast, this);
     this.gameScene.events.on('dialog', this.showDialog, this);
+    this.gameScene.events.on('dialogNext', this.nextDialog, this);
     this.gameScene.events.on('paused', this.showPause, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this);
       this.gameScene.events.off('toast', this.showToast, this);
       this.gameScene.events.off('dialog', this.showDialog, this);
+      this.gameScene.events.off('dialogNext', this.nextDialog, this);
+      this.gameScene.dialogOpen = false;
       this.gameScene.events.off('paused', this.showPause, this);
       this.dialog.clear();
       controls.reset();
@@ -405,6 +408,7 @@ export class HudScene extends Phaser.Scene {
     // Dialog box (and where the prompt goes around it).
     if (!this.paused) this.dialogClock += delta / 1000;
     const view = this.dialog.update(this.dialogClock);
+    this.gameScene.dialogOpen = this.dialog.open;
     this.drawDialog(view, time);
     let promptY = this.promptY;
     if (view && this.touch) promptY = Math.min(promptY, this.dialogBox.y - 44 * s);
@@ -513,6 +517,14 @@ export class HudScene extends Phaser.Scene {
 
   private showDialog(line: DialogLine) {
     this.dialog.push(line, this.dialogClock);
+    this.gameScene.dialogOpen = this.dialog.open;
+  }
+
+  /** The action key / button while the box is up (GameScene hands it over): finish typing, or close. */
+  private nextDialog() {
+    if (this.paused) return;
+    this.dialog.advance(this.dialogClock);
+    this.gameScene.dialogOpen = this.dialog.open;
   }
 
   private drawDialog(view: DialogView | null, time: number) {
@@ -634,10 +646,9 @@ export class HudScene extends Phaser.Scene {
       else if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') this.selectPause(this.pauseIndex - 1);
       else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') this.selectPause(this.pauseIndex + 1);
       else if (e.key === 'Enter' || e.key === ' ') this.pauseButtons[this.pauseIndex]?.run();
-      return;
     }
-    // The action key also moves the dialog along (the game still gets it too).
-    if (this.dialog.open && (e.key === 'e' || e.key === 'E' || e.key === ' ' || e.key === 'Enter')) this.dialog.advance(this.dialogClock);
+    // The action key moves the dialog along through GameScene (see nextDialog), so only one of
+    // the dialog and the game ever gets a press.
   }
 
   // ---- toasts ------------------------------------------------------------

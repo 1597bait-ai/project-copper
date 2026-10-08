@@ -7,7 +7,7 @@ import { findPath, smoothPath, type Point } from '../systems/pathfinding';
 import { DEPTH } from '../ui/depth';
 import { textStyle } from '../ui/theme';
 import type { World } from '../world/World';
-import { CharacterView } from './CharacterView';
+import { CharacterView, facingOf } from './CharacterView';
 import { Emote } from './SpeechBubble';
 
 /** Seconds it takes him to slide out from under the desk (still asleep). */
@@ -67,6 +67,11 @@ export class SleepyCoworker {
 
   get gone(): boolean {
     return this.step === 'gone';
+  }
+
+  /** He has handed over the hush money (it changes hands on the 'bribe' beat). */
+  get paid(): boolean {
+    return this.step === 'bribe' || this.step === 'leave' || this.step === 'fade' || this.step === 'gone';
   }
 
   /** Runs one frame. `player` is where Dalton is (he faces him, then shuffles away from him). */
@@ -176,7 +181,9 @@ export class SleepyCoworker {
     this.moving = true;
   }
 
+  /** Turns to Dalton while he talks, but never with his back to the camera: from below he turns sideways. */
   private face(p: Point) {
-    this.facing = Math.atan2(p.y - this.y, p.x - this.x);
+    const angle = Math.atan2(p.y - this.y, p.x - this.x);
+    this.facing = facingOf(angle) === 'up' ? (p.x < this.x ? Math.PI : 0) : angle;
   }
 }
