@@ -3,6 +3,8 @@
 
 import { describe, expect, it } from 'vitest';
 import { artKeys } from '../art';
+import { LOOKS, characterFrames } from '../art/characters';
+import { objectPix } from '../art/objects';
 import { CHARACTERS } from '../config/characters';
 import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
@@ -15,15 +17,28 @@ import { parseMap, serializeMap } from './mapText';
 import { MAPS } from './maps';
 import { validateMap, walkGrid } from './validate';
 
-const spriteKeys = new Set(artKeys());
+const textureKeys = new Set(artKeys());
 
 describe('content', () => {
-  it('every fixture, decoration, character and NPC has art', () => {
-    for (const id of Object.keys(FIXTURES)) expect(spriteKeys.has(id), `sprite for fixture ${id}`).toBe(true);
-    for (const id of Object.keys(DECOR)) expect(spriteKeys.has(id), `sprite for decoration ${id}`).toBe(true);
-    for (const c of Object.values(CHARACTERS)) expect(spriteKeys.has(c.sprite), `sprite for ${c.id}`).toBe(true);
-    for (const n of Object.values(NPCS)) {
-      for (const key of [n.sprite, ...(n.variants ?? [])]) expect(spriteKeys.has(key), `sprite ${key} for ${n.id}`).toBe(true);
+  it('every fixture, decoration, character and NPC has pixel art, made into a texture at boot', () => {
+    const objects = objectPix();
+    for (const [kind, ids] of [
+      ['fixture', Object.keys(FIXTURES)],
+      ['decoration', Object.keys(DECOR)],
+    ] as const) {
+      for (const id of ids) {
+        expect(objects[id]?.empty, `pixel art for ${kind} ${id} in src/art/objects.ts`).toBe(false);
+        expect(textureKeys.has(id), `texture for ${kind} ${id}`).toBe(true);
+      }
+    }
+    const people = [
+      ...Object.values(CHARACTERS).map((c) => [c.id, c.sprite] as const),
+      ...Object.values(NPCS).flatMap((n) => [n.sprite, ...(n.variants ?? [])].map((key) => [n.id, key] as const)),
+    ];
+    for (const [id, key] of people) {
+      expect(LOOKS[key], `look "${key}" for ${id} in src/art/characters.ts`).toBeDefined();
+      expect(characterFrames(LOOKS[key]).every((f) => !f.pix.empty), `frames of ${key}`).toBe(true);
+      for (const k of [key, `${key}_sheet`, `${key}_big`]) expect(textureKeys.has(k), `texture ${k} for ${id}`).toBe(true);
     }
   });
 

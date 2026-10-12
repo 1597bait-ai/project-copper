@@ -40,11 +40,13 @@ from the van (out front in the parking lot):
 - *Front*: the main entrance and lobby at the bottom centre, then the halls.
 - *Top row*: classrooms 1-8 (desks, lamps, heaters), each with a whiteboard, along the top
   hallway. The custodial closet sits in the top-right corner (mop sink, an electric panel, copper).
-- *Middle*: classrooms 9-12 and the men's (blue) and women's (pink) restrooms (toilets are brass).
+- *Middle*: classrooms 9-12 and the men's (blue) and women's (pink) restrooms (sinks by the doors,
+  toilets are brass).
   The halls have fountains and heaters (copper) and are Mr. Gravy's patrol.
-- *Right side* (deepest): the **boiler room**, reached only through the narrow corridor along the
-  right wall, with the **locked electric panel room** inside it. The copper piles and panels back
-  here are **bare bright copper**, worth twice normal copper, so a trip to the back pays the most.
+- *Right side* (deepest): the **boiler room** (boiler, generator and pressure gauges), reached only
+  through the narrow corridor along the right wall, with the **locked electric panel room** inside
+  it. The copper piles and panels back here are **bare bright copper**, worth twice normal copper,
+  so a trip to the back pays the most.
 
 **Crew:** Dalton (fast, *Act Like a Student*: hides carried scrap for 5s), Tomothy (slow,
 best at repair, *Act Like You're Working*: scrapping looks legit for 6s), Dunkin (carries the most).
@@ -83,7 +85,7 @@ src/config/        ← the design board lives here: edit numbers, add content
   upgrades.ts        boots, tools, bags, keys (for the shop, not wired up yet)
   balance.ts         every tuning knob: shift length, stat → speed, vision cones, students, high alert,
                      the sleepy coworker...
-  decor.ts           plants, trash cans, trees, cars (sizes)
+  decor.ts           decorations: plants, trash cans, trees, cars, boiler, generator, sinks (sizes)
 src/systems/       pure game rules, no Phaser (bag, scrapping math, A* pathfinding, vision, clock, save,
                    studentMind / alert / coworker: what students and the coworker decide)
 src/entities/      Player, Boss (Mr. Gravy's AI), Student, SleepyCoworker, Fixture, Door;
@@ -94,11 +96,13 @@ src/world/         map format (legend.ts, mapText.ts), checker (validate.ts), ed
 src/assets/maps/   the maps themselves, as plain text
 src/scenes/        Boot → Menu → Game + Hud → ShiftEnd, and the map Editor
 src/input/         keyboard, touch and gamepad all feed one Controls object
-src/ui/            theme (Pixelify Sans font, GBA-style windows, buttons), dialog box timing, depth order
+src/ui/            theme (fonts, GBA-style windows, buttons), dialog box timing, depth order
+src/assets/fonts/  the pixel fonts, part of the game (no network needed): Pixelify Sans for text and
+                   Jersey 15 for digits (Pixelify's 5 looks like an S), with their licences (OFL)
 src/art/           all the pixel art, drawn in code at boot (no image files): tiles.ts (floors and
-                   walls), objects.ts (fixtures, decor, cars, van, doors), characters.ts (everyone's
-                   walk / yell / work frames and portraits), ui.ts (HUD icons). pixel.ts has the
-                   helpers; sprites.ts is the old vector art, now only a fallback for missing keys
+                   walls), objects.ts (fixtures, decorations, cars, van, doors, recharge clock),
+                   characters.ts (everyone's walk / yell / work frames and portraits), ui.ts (HUD
+                   icons). pixel.ts has the helpers
 tools/             map checker, app icon renderer, e2e test
 ```
 
@@ -113,13 +117,15 @@ Maps are plain text: **one character = one tile** (64 px). The file
 `src/assets/maps/lincoln.txt` starts with the legend, for example `#` wall, `.` hallway,
 `,` classroom carpet, `W` whiteboard wall, `~`/`^` blue/pink restroom tile, `f` drinking
 fountain, `c` abandoned copper pile, `e` electric panel, `*` plant, `u` trash can, `T` tree,
-`P` player start, `G` Mr. Gravy, `S` student, `L` a locked door, `1`–`9` Mr. Gravy's route in
-order, `C` a parked car (a 2x2 block) and `V` the van (a 4x2 or 2x4 block, e.g. two rows of
-`VVVV`). Things stand on the floor next to them, so you never pick a floor for them; put them on
-a floor tile beside a wall, not in the wall. Plants, trash cans, trees and cars block walking
-but not sight. Mr. Gravy walks the shortest way between route stops, so place stops along
-hallways if you want him to stay in them. A line like `@ 40,15 Boiler Room` names the room
-containing tile x=40, y=15.
+`s` sink, `Q` pressure gauges, `P` player start, `G` Mr. Gravy, `S` student, `L` a locked door,
+`1`–`9` Mr. Gravy's route in order, and blocks for big things: `C` a parked car (2x2), `O` the
+boiler (2x2), `Z` a generator (2x1) and `V` the van (4x2 or 2x4, e.g. two rows of `VVVV`).
+Things stand on the floor next to them, so you never pick a floor for them; put them on a floor
+tile beside a wall, not in the wall. Decorations (plants, trash cans, trees, cars, the boiler
+room's machines, sinks) block walking but not sight, so one typed into a wall line would be a
+window through it (`npm run map:check` warns about that). Mr. Gravy walks the shortest way
+between route stops, so place stops along hallways if you want him to stay in them. A line like
+`@ 40,15 Boiler Room` names the room containing tile x=40, y=15.
 
 Two ways to change it:
 - **In the game:** Menu → **MAP EDITOR**. Paint floors and walls (click-drag or finger-drag),
@@ -137,8 +143,12 @@ Two ways to change it:
 
 - **New fixture:** add an entry to `src/config/fixtures.ts`, give it a map character in
   `FIXTURE_CHARS` (`src/world/legend.ts`) and pixel art under the same key in `objectPix()`
-  (`src/art/objects.ts`; wall-mounted ones can add a `<id>_side` view). It shows up in the
-  editor's palette automatically.
+  (`src/art/objects.ts`). Wall-mounted ones also need a `<id>_side` view, drawn against a wall on
+  its left (it's mirrored for a wall on the right); `npm test` checks every fixture has its art.
+  It shows up in the editor's palette automatically.
+- **New decoration:** the same, with `src/config/decor.ts` (its size in tiles) and `DECOR_CHARS`.
+  Big ones are written in the map as a filled block of their character, and their art is as wide
+  as the block (16 art pixels per tile) and may reach up over the tile above.
 - **New map:** add a `.txt` file to `src/assets/maps/` and list it in `src/world/maps.ts`. For
   now the game plays (and the editor opens) the first map in that list, so put a new map first
   to play it; every listed map is checked by `npm test`.
@@ -147,8 +157,18 @@ Two ways to change it:
   frames and portrait are drawn from that. They show up on the crew select screen automatically.
 - **What people say:** student yells and chatter, Mr. Gravy's lines and the sleepy coworker's
   lines are in `src/config/npcs.ts`.
-- **Real art / sounds:** replace a texture by loading a PNG with the same key in `BootScene`;
-  sound effects are synthesized in `src/systems/sfx.ts` until real ones exist.
+- **Real art:** load a PNG with the same key in a `preload()` in `src/scenes/BootScene.ts` (e.g.
+  `this.load.image('desk', 'art/desk.png')`): the generated art leaves any key that's already
+  loaded alone. Images are at screen size (a tile is 64 px; the generated art is 16-pixel art
+  drawn at 4x) and stand on the bottom of their tile. Fixtures and decorations are one image
+  named by their id (wall-mounted fixtures also `<id>_side`, see above). People need three:
+  `<key>` (standing, facing you), `<key>_big` (a portrait) and `<key>_sheet`, an atlas
+  (`this.load.atlas`) with frames `down-0`, `down-1`, `down-2`, then the same for `up`, `left` and
+  `right` (0 standing, 1 and 2 walking steps), and, if they have them, `<facing>-yell`,
+  `<facing>-work-0`/`-1` (hammering) and `sleep-0`/`-1`; each frame has an empty 4 px border.
+  The floors and walls are one texture, `tileset-school`, laid out like the generated one
+  (`src/world/autotile.ts`).
+- **Sounds:** synthesized in `src/systems/sfx.ts` until real ones exist.
 
 ### Publish
 

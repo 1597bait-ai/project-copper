@@ -1,5 +1,6 @@
+import type Phaser from 'phaser';
 import { describe, expect, it } from 'vitest';
-import { Pix, alpha, fromRows, mix, rng } from './pixel';
+import { Pix, addSheet, addTexture, alpha, fromRows, mix, rng } from './pixel';
 
 describe('Pix', () => {
   it('draws, outlines and mirrors', () => {
@@ -20,6 +21,15 @@ describe('Pix', () => {
     expect(p.get(0, 0) & 0xffffff).toBe(mix(0xffffff, 0x000000, 128 / 255));
     expect(p.get(0, 0) >>> 24).toBe(255);
     expect(alpha(0x123456, 0)).toBeNull();
+  });
+
+  it('leaves a texture that is already loaded alone (real art replaces the generated art)', () => {
+    const png = { key: 'desk' };
+    // No canvas is drawn (there is no browser here): the loaded texture is handed back as it is.
+    const textures = { exists: (key: string) => key === 'desk', get: () => png } as unknown as Phaser.Textures.TextureManager;
+    const pix = new Pix(1, 1).set(0, 0, 0xff0000);
+    expect(addTexture(textures, 'desk', pix)).toBe(png);
+    expect(addSheet(textures, 'desk', [{ name: 'a', pix }])).toBe(png);
   });
 
   it('random numbers repeat for the same seed', () => {

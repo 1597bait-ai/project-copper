@@ -1,53 +1,52 @@
 import Phaser from 'phaser';
-import { LIGATURE, breakLigatures, isDarkColor, shadowOffset } from './textRules';
+import { DIGITS_FONT_NAME, FONT_NAME, LIGATURE, breakLigatures, fontFileName, isDarkColor, shadowOffset } from './textRules';
 
-export { breakLigatures, isDarkColor, shadowOffset };
+export { DIGITS_FONT_NAME, FONT_NAME, breakLigatures, isDarkColor, shadowOffset };
 
 // The UI look: a Pokemon (GBA) style. Cream windows with a dark navy rim and a light blue inner
 // rim, pixel corners, dark text with a light drop shadow inside windows, and light text with a
 // thin dark outline and a hard shadow when drawn straight over the game.
 
-/** The pixel font (loaded from Google Fonts by index.html; monospace if it can't be reached). */
-export const FONT_NAME = 'Pixelify Sans';
-/**
- * Pixelify Sans's 5 looks just like its S ("$50" reads "$S0", "7:05" reads "7:0S"), so digits come
- * from Tiny5, a pixel font of the same height and weight. index.html loads only its digits 0-9,
- * so every other character falls through to Pixelify Sans.
- */
-export const DIGITS_FONT_NAME = 'Tiny5';
+/** Digits from the digits font, everything else from Pixelify Sans (see textRules.ts). */
 export const FONT = `"${DIGITS_FONT_NAME}", "${FONT_NAME}", monospace`;
-/** Weights texts use (bold for titles). */
-const FONT_WEIGHTS = ['400', '700'];
-/** Never hold up the start for longer than this (offline, slow networks). */
-export const FONT_TIMEOUT_MS = 3000;
 
 /**
- * Waits (briefly) for the pixel fonts, so the first texts aren't drawn in the fallback font.
- * index.html loads the fonts' stylesheets without blocking the page (media="print"); this switches
- * them on once they arrive. Gives up after FONT_TIMEOUT_MS so offline play still starts.
+ * The font files (src/assets/fonts/, with their licences), inlined into the game itself: no
+ * request to wait for, so they work offline and in the single-file build, and are never late.
+ */
+const FONT_FILES = import.meta.glob<string>('../assets/fonts/*.woff2', { query: '?inline', import: 'default', eager: true });
+
+const FONT_FACES: { family: string; descriptors: FontFaceDescriptors }[] = [
+  // One variable font file covers every weight texts use (bold for titles).
+  { family: FONT_NAME, descriptors: { weight: '400 700' } },
+  // The digits are bold already: bold texts use them as they are, not a smeared fake bold.
+  { family: DIGITS_FONT_NAME, descriptors: { weight: '400 700', unicodeRange: 'U+0030-0039' } },
+];
+
+/** Never hold up the start for longer than this (a font file the browser can't read). */
+export const FONT_TIMEOUT_MS = 3000;
+
+let fontsReady: Promise<unknown> | null = null;
+
+/**
+ * Registers the bundled pixel fonts and waits until they're ready, so no text is drawn in the
+ * fallback font. They're part of the game, so this takes milliseconds; it gives up after
+ * FONT_TIMEOUT_MS anyway rather than hold up the start.
  */
 export async function loadFonts(timeoutMs = FONT_TIMEOUT_MS): Promise<void> {
-  if (typeof document === 'undefined' || !document.fonts) return;
-  const links = [...document.querySelectorAll<HTMLLinkElement>('link[data-pixel-font]')];
-  // Offline: the stylesheets have already failed, there is nothing to wait for.
-  if (links.some((l) => !l.sheet) && typeof navigator !== 'undefined' && navigator.onLine === false) return;
-  const sheetLoaded = (link: HTMLLinkElement) =>
-    link.sheet
-      ? Promise.resolve()
-      : new Promise<void>((done) => {
-          link.addEventListener('load', () => done(), { once: true });
-          link.addEventListener('error', () => done(), { once: true });
-        });
-  const ready = (async () => {
-    await Promise.all(links.map(sheetLoaded));
-    for (const link of links) link.media = 'all';
-    await Promise.all([
-      ...FONT_WEIGHTS.map((w) => document.fonts.load(`${w} 32px "${FONT_NAME}"`)),
-      document.fonts.load(`32px "${DIGITS_FONT_NAME}"`, '0123456789'),
-    ]);
-  })().catch(() => undefined);
+  if (typeof document === 'undefined' || !document.fonts || typeof FontFace === 'undefined') return;
+  // (async, so a browser that can't make a FontFace just falls back instead of failing the boot)
+  fontsReady ??= Promise.all(
+    FONT_FACES.map(async ({ family, descriptors }) => {
+      const file = FONT_FILES[`../assets/fonts/${fontFileName(family)}`];
+      if (!file) return console.warn(`No font file src/assets/fonts/${fontFileName(family)} for "${family}"`);
+      const face = new FontFace(family, `url("${file}") format("woff2")`, descriptors);
+      document.fonts.add(face);
+      await face.load();
+    }),
+  ).catch(() => undefined);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  await Promise.race([ready, new Promise<void>((done) => (timer = setTimeout(done, timeoutMs)))]);
+  await Promise.race([fontsReady, new Promise<void>((done) => (timer = setTimeout(done, timeoutMs)))]);
   clearTimeout(timer);
 }
 

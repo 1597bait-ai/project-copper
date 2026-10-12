@@ -168,6 +168,25 @@ describe('paint', () => {
     expect(moved).toEqual(['|pppp|', '|pppp|', '|pppp|', '|pppp|', '|VVVV|', '|VVVV|']);
   });
 
+  it('fills a removed car or tree with the floor it stands on, not the parking line beside it', () => {
+    // prettier-ignore
+    const lot = [
+      'Fppppppppppp',
+      'Fp|CC|pp|CC|',
+      'Fp|CC|pp|CC|',
+      'Fppppppppppp',
+      'Fp|Tg|pp|*g|',
+      'Fp|gg|pp|gg|',
+    ];
+    const erased = paint(lot, 3, 1, ERASER).rows;
+    expect(erased.slice(1, 3)).toEqual(['Fp|pp|pp|CC|', 'Fp|pp|pp|CC|']);
+    // Anything put over a car removes the whole car the same way.
+    expect(paint(lot, 4, 2, 'd').rows.slice(1, 3)).toEqual(['Fp|pp|pp|CC|', 'Fp|pd|pp|CC|']);
+    // A tree on a patch of grass leaves grass; other decorations the floor most common around them.
+    expect(paint(lot, 3, 4, ERASER).rows[4]).toBe('Fp|gg|pp|*g|');
+    expect(paint(lot, 9, 4, ERASER).rows[4]).toBe('Fp|Tg|pp|gg|');
+  });
+
   it('erases things down to their floor and floors/walls to hallway', () => {
     expect(paint(SMALL, 3, 2, ERASER).rows[2]).toBe('B,,,,....B'); // desk -> carpet
     expect(paint(SMALL, 2, 2, ERASER).rows[2]).toBe('B,.d,....B'); // carpet -> hallway
@@ -230,6 +249,18 @@ describe('paint', () => {
       expect(parsed.problems).toEqual([]);
       expect(parsed.decor.filter((d) => d.id === 'car')).toHaveLength(2);
     }
+  });
+
+  it('stamps and removes the boiler room machines whole (2x2 boiler, 2x1 generator)', () => {
+    const room = ['bbbbbb', 'bbbbbb', 'bbbbbb'];
+    const generator = paint(room, 1, 1, 'Z').rows;
+    expect(generator).toEqual(['bbbbbb', 'bZZbbb', 'bbbbbb']);
+    expect(parseMap(generator.join('\n')).decor).toEqual([{ id: 'generator', x: 1, y: 1, w: 2, h: 1 }]);
+    expect(paint(generator, 2, 1, ERASER).rows).toEqual(room);
+    const boiler = paint(generator, 4, 0, 'O').rows;
+    expect(boiler).toEqual(['bbbbOO', 'bZZbOO', 'bbbbbb']);
+    expect(parseMap(boiler.join('\n')).decor).toContainEqual({ id: 'boiler', x: 4, y: 0, w: 2, h: 2 });
+    expect(paint(boiler, 5, 1, 'd').rows).toEqual(['bbbbbb', 'bZZbbd', 'bbbbbb']);
   });
 
   it('places single-tile decorations like any other thing', () => {

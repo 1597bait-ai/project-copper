@@ -34,7 +34,8 @@ export type CoworkerEvent = 'jolt' | 'excuse' | 'bribe' | 'gone';
  */
 export class SleepyCoworker {
   readonly view: CharacterView;
-  private readonly emote: Emote;
+  /** His '!' and '$' (GameScene hides it under someone's speech bubble). */
+  readonly emote: Emote;
   private readonly zs: Phaser.GameObjects.Text[];
   step: CoworkerStep = 'nap';
   x: number;
@@ -112,7 +113,8 @@ export class SleepyCoworker {
     }
   }
 
-  syncView(time: number): void {
+  /** `size`: how much bigger to draw his marks (phones zoomed out, see GameScene.overheadScale). */
+  syncView(time: number, size = 1): void {
     if (this.gone) return;
     const napping = this.step === 'nap';
     // A little jump when he jolts awake.
@@ -123,17 +125,17 @@ export class SleepyCoworker {
     const startled = this.step === 'jolt' || this.step === 'excuse';
     const paying = this.step === 'bribe' && this.t < PAY_EMOTE_SECONDS;
     this.emote.show(startled ? '!' : paying ? '$' : null, time);
-    this.emote.place(this.x, head - 4, time);
+    this.emote.place(this.x, head - 4, time, size);
 
     // Zs drift up and to the right, one after another, fading as they go.
     this.zs.forEach((z, i) => {
       z.setVisible(napping);
       if (!napping) return;
       const k = ((time / 1000 + (i * Z_SECONDS) / ZS) % Z_SECONDS) / Z_SECONDS;
-      const x = this.x + 14 + k * 26 + Math.sin(k * Math.PI * 2) * 6;
-      const y = head + 10 - k * 52;
+      const x = this.x + (14 + k * 26 + Math.sin(k * Math.PI * 2) * 6) * size;
+      const y = head + (10 - k * 52) * size;
       z.setPosition(Math.round(x / PX) * PX, Math.round(y / PX) * PX)
-        .setScale(0.7 + k * 0.6)
+        .setScale((0.7 + k * 0.6) * size)
         .setAlpha(Math.min(1, (1 - k) * 2) * this.view.container.alpha);
     });
   }

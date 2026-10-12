@@ -41,7 +41,7 @@ export interface ParsedMap {
   van: TileRect | null;
   doors: TileRect[];
   fixtures: { id: string; x: number; y: number }[];
-  /** Plants, trash cans, trees, cars (see src/config/decor.ts). Solid but see-through. */
+  /** Plants, trash cans, trees, cars, the boiler... (see src/config/decor.ts). Solid but see-through. */
   decor: ({ id: string } & TileRect)[];
   /** Mr. Gravy's route, in stop order. */
   patrol: TilePoint[];
@@ -228,7 +228,7 @@ export function parseMap(text: string): ParsedMap {
   const van = vans[0] ? { x: vans[0].x, y: vans[0].y, w: vans[0].w, h: vans[0].h } : null;
   if (van && Math.min(van.w, van.h) < 2) problems.push('The van needs at least a 2x2 block of V (2x4 or 4x2 looks right)');
   const doors = groups('L').map(({ x, y, w, h }) => ({ x, y, w, h }));
-  // Big decorations (cars): each block of their character is cut into w x h pieces.
+  // Big decorations (cars, the boiler...): each block of their character is cut into w x h pieces.
   for (const [ch, id] of Object.entries(DECOR_CHARS)) {
     const { w, h, name } = DECOR[id];
     if (w === 1 && h === 1) continue;

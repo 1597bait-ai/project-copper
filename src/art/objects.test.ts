@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
-import { CAR_KEYS, objectArt, objectPix } from './objects';
+import { CAR_KEYS, RECHARGE_FRAMES, objectArt, objectPix, rechargeFrames } from './objects';
 
 describe('object art', () => {
   const all = objectPix();
@@ -33,6 +33,32 @@ describe('object art', () => {
       expect(p.w, def.id).toBe(16);
       expect(p.h, def.id).toBeGreaterThanOrEqual(16);
     }
+  });
+
+  it('big decorations cover their footprint (2x2 boiler, 2x1 generator, cars)', () => {
+    for (const def of Object.values(DECOR)) {
+      if (def.w * def.h === 1) continue;
+      const p = all[def.id];
+      expect(p.w, def.id).toBe(def.w * 16);
+      expect(p.h, def.id).toBeGreaterThanOrEqual(def.h * 16);
+    }
+  });
+
+  it('draws the recharge clock as a light face that fills up green, never a dark disc', () => {
+    const frames = rechargeFrames();
+    expect(frames).toHaveLength(RECHARGE_FRAMES + 1);
+    const count = (p: (typeof frames)[number], rgb: number) => Array.from(p.data).filter((v) => v !== 0 && (v & 0xffffff) === rgb).length;
+    const light = (p: (typeof frames)[number]) =>
+      Array.from(p.data).filter((v) => {
+        if (v === 0) return false;
+        const lum = 0.299 * ((v >> 16) & 255) + 0.587 * ((v >> 8) & 255) + 0.114 * (v & 255);
+        return lum > 200;
+      }).length;
+    const green = frames.map((p) => count(p, 0x7ddc7d));
+    expect(green[0]).toBe(0);
+    expect(light(frames[0])).toBeGreaterThan(25); // most of the face
+    for (let i = 1; i < frames.length; i++) expect(green[i], `frame ${i}`).toBeGreaterThan(green[i - 1]);
+    expect(light(frames[RECHARGE_FRAMES])).toBe(0);
   });
 
   it('lists every key it paints', () => {

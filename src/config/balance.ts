@@ -24,11 +24,20 @@ export const BALANCE = {
   /** Seconds the boss ignores you after handing out a warning. */
   graceSeconds: 3,
 
-  /** Speed stat -> tiles per second. Dalton (3) = 3.2, Dunkin (2) = 2.6, Tomothy (1) = 2.0. */
-  tilesPerSecond: (speedStat: number) => 1.4 + 0.6 * speedStat,
+  /**
+   * Speed stat -> walking speed: base + perSpeed x stat (tiles per second). Dalton (3) = 3.2,
+   * Dunkin (2) = 2.6, Tomothy (1) = 2.0. Mr. Gravy and the students use the same rule.
+   */
+  movement: {
+    baseTilesPerSecond: 1.4,
+    tilesPerSecondPerSpeed: 0.6,
+  },
 
-  /** Carry stat -> bag capacity in scrap units. Dalton (carry 1) gets the board's "bag: 2". */
-  bagCapacity: (carryStat: number) => 1 + carryStat,
+  /** Carry stat -> bag capacity in scrap units: base + perCarry x stat. Dalton (carry 1) gets the board's "bag: 2". */
+  bag: {
+    baseCapacity: 1,
+    capacityPerCarry: 1,
+  },
 
   repair: {
     /** Fixture workSeconds are measured at this repair value. */
@@ -37,6 +46,19 @@ export const BALANCE = {
     specialtyBonus: 0.5,
     /** Board: "else: +0.25 repair". */
     otherBonus: 0.25,
+  },
+
+  /**
+   * The camera on phones and other small screens (big screens show the map 1:1). It zooms out far
+   * enough that any student who can see Dalton is on screen too, without people getting too small.
+   */
+  camera: {
+    /** Tiles Dalton sees past the farthest a student sees (on high alert), out to the nearer screen edge. */
+    seeBeyondTiles: 1,
+    /** A tile is never drawn smaller than this many CSS pixels... */
+    minTileCssPx: 24,
+    /** ...nor bigger. Speech bubbles and '!' marks keep the size they have at this zoom. */
+    maxTileCssPx: 34,
   },
 
   /** How close (tiles, centre to centre) you need to be to scrap / unlock. */
@@ -52,10 +74,12 @@ export const BALANCE = {
     /** Patrol speed as a fraction of chase speed. */
     patrolFactor: 0.62,
     waypointPause: [0.8, 1.8] as [number, number],
-    /** Awareness stat -> how far the vision cone reaches (tiles). Mr. Gravy (2) = 5 tiles. */
-    visionRangeTiles: (awareness: number) => 2.5 + 1.25 * awareness,
-    /** Awareness stat -> half-angle of the vision cone (degrees). Mr. Gravy (2) = 40°, so an 80° cone. */
-    visionHalfAngleDeg: (awareness: number) => 30 + 5 * awareness,
+    /** Awareness stat -> how far the vision cone reaches: base + perAwareness x stat (tiles). Mr. Gravy (2) = 5 tiles. */
+    visionRangeBaseTiles: 2.5,
+    visionRangeTilesPerAwareness: 1.25,
+    /** Awareness stat -> half-angle of the vision cone: base + perAwareness x stat (degrees). Mr. Gravy (2) = 40°, so an 80° cone. */
+    visionHalfAngleBaseDeg: 30,
+    visionHalfAngleDegPerAwareness: 5,
     /** Seconds of being seen before you're caught, close up -> at the edge of the cone (at awareness 2). */
     noticeSecondsNear: 0.9,
     noticeSecondsFar: 2.1,
@@ -171,3 +195,26 @@ export const BALANCE = {
     fadeSeconds: 0.8,
   },
 };
+
+// The rules that turn stats into numbers. Read BALANCE every time (never cache the results in a
+// module), so values changed in Copper Studio apply to the next shift.
+
+/** Speed stat -> tiles per second. */
+export function tilesPerSecond(speedStat: number): number {
+  return BALANCE.movement.baseTilesPerSecond + BALANCE.movement.tilesPerSecondPerSpeed * speedStat;
+}
+
+/** Carry stat -> bag capacity in scrap units. */
+export function bagCapacity(carryStat: number): number {
+  return BALANCE.bag.baseCapacity + BALANCE.bag.capacityPerCarry * carryStat;
+}
+
+/** Mr. Gravy's awareness stat -> how far his vision cone reaches (tiles). */
+export function bossVisionRangeTiles(awareness: number): number {
+  return BALANCE.boss.visionRangeBaseTiles + BALANCE.boss.visionRangeTilesPerAwareness * awareness;
+}
+
+/** Mr. Gravy's awareness stat -> half-angle of his vision cone (degrees). */
+export function bossVisionHalfAngleDeg(awareness: number): number {
+  return BALANCE.boss.visionHalfAngleBaseDeg + BALANCE.boss.visionHalfAngleDegPerAwareness * awareness;
+}

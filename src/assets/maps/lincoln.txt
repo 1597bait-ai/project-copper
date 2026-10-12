@@ -40,11 +40,16 @@
 //   u  Trash can
 //   T  Tree
 //   C  Parked car (fill a 2x2 block)
+//   O  Boiler (fill a 2x2 block)
+//   Z  Generator (fill a 2x1 block)
+//   Q  Pressure gauges
+//   s  Sink (with a wall above it)
 //   1-9  Mr. Gravy's route, walked in order and looped
 //
 // Lincoln Middle School, drawn from the floor-plan sketch: classrooms 1-8 along the top,
-// classrooms 9-12 and the restrooms in the middle, the boiler room (and its locked electric
-// panel room) on the right, reached only by the narrow corridor along the right wall.
+// classrooms 9-12 and the restrooms in the middle, the boiler room (its boiler, generator and
+// gauges at the top, its locked electric panel room below) on the right, reached only by the
+// narrow corridor along the right wall.
 // The best copper is the deepest: boiler room, electric panel room and custodial closet.
 
 @ 5,5 Classroom 1
@@ -82,11 +87,11 @@ FggB.1........................G................BggF
 FTgB.................2...S..............3......BgTF
 FggB...........................................BggF
 FggB...u#WW,,#WW,,#*...##~~##^^###..u########..BggF
-FggB....#,,,,#,,,,#....#~~~~#^^^^#...#ebbbbe#..BggF
-FggBh...#d,d,#d,d,#....#t~~~#^^^t#...#bbbbbb#..BggF
+FggB....#,,,,#,,,,#....#s~~s#^^ss#...#ebOObe#..BggF
+FggBh...#d,d,#d,d,#....#t~~~#^^^t#...#bbOObb#..BggF
 FggB....#,,,,#,S,,#...h#~~~~#^^^^#...#bbcbbb#4.BggF
-FTgB....#d,dl#d,dh#....#t~~~#^^^t#f..#bbbbbb#..BgTF
-FggB..S.##WW###WW##....#~~~~#^^^^#...#bbbbbb#.hBggF
+FTgB....#d,dl#d,dh#....#t~~~#^^^t#f..#bbbbbQ#..BgTF
+FggB..S.##WW###WW##....#~~~~#^^^^#...#ZZbbbb#.hBggF
 FggB.9..#l,,,#,,,h#..7.#t~~~#^^^t#.5.#bbb#b##..BggF
 FggB....#d,,d#d,,d#f...#~~~~#^^^^#...#cbb#bb#..BggF
 FggBf...#,,S,#,,,,#....#t~~~#^^^t#..h#bbb#bb#..BggF

@@ -13,16 +13,8 @@
     <link rel="icon" type="image/svg+xml" href="./icon.svg" />
     <link rel="apple-touch-icon" href="./icon-192.png" />
     <title>Project Copper</title>
-    <!--
-      The pixel font. Loaded without blocking the page (media="print" until it arrives:
-      src/ui/theme.ts loadFonts() switches it on), so the game still starts offline.
-    -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400..700&amp;display=swap" media="print" data-pixel-font />
-    <!-- Only the digits of Tiny5: Pixelify Sans's 5 looks like an S (see FONT in src/ui/theme.ts). -->
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tiny5&amp;text=0123456789&amp;display=swap" media="print" data-pixel-font />
-    <style>
+    <!-- The pixel fonts are part of the game (src/assets/fonts/, loaded by src/ui/theme.ts): nothing to fetch. -->
+    <style id="copper-style">
       /* The game has one deliberate dark look in every theme. */
       :root {
         --bg: #14161c;
@@ -56,6 +48,7 @@
     </style>
   </head>
   <body>
+    <!-- copper-tuning -->
     <div id="game"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

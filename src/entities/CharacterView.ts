@@ -23,11 +23,6 @@ import { type Facing, facingOf, nextFacing, restartDistance, sleepFrame, walkFra
 export type { Facing };
 export { facingOf };
 
-export interface CharacterViewOptions {
-  /** Students are drawn a little smaller than the grown-ups. */
-  scale?: number;
-}
-
 export interface PoseOptions {
   /** Faster steps (chasing, fleeing). */
   running?: boolean;
@@ -40,7 +35,7 @@ export interface PoseOptions {
   pose?: 'yell' | 'sleep';
 }
 
-/** Feet sit this far below the body centre (unscaled px): people stand on their tile, not on its middle. */
+/** Feet sit this far below the body centre (px): people stand on their tile, not on its middle. */
 const FEET = Math.round(TILE * 0.22);
 /** Distance per walking frame (px): the walk cycle keeps pace with the ground. */
 const STRIDE = { walk: 26, run: 30 };
@@ -58,7 +53,6 @@ export class CharacterView {
   private readonly sprite: Phaser.GameObjects.Image;
   private readonly shadow: Phaser.GameObjects.Image;
   private readonly sack: Phaser.GameObjects.Image;
-  private readonly scale: number;
   private carry = 0;
   /** Sheet texture key, or null when the look has no frames (then the plain image is shown). */
   private sheet: string | null = null;
@@ -76,14 +70,12 @@ export class CharacterView {
     private key: string,
     x: number,
     y: number,
-    opts: CharacterViewOptions = {},
   ) {
-    this.scale = opts.scale ?? 1;
     this.lastX = x;
     this.lastY = y;
     this.shadow = scene.add.image(0, this.feet, 'shadow');
     this.sack = scene.add.image(0, 0, 'sack').setVisible(false);
-    this.sprite = scene.add.image(0, this.feet, key).setOrigin(0.5, 1).setScale(this.scale);
+    this.sprite = scene.add.image(0, this.feet, key).setOrigin(0.5, 1);
     this.container = scene.add.container(x, y, [this.shadow, this.sack, this.sprite]).setDepth(sortDepth(y + this.feet));
     this.applyKey();
     this.show(`${this.facing}-0`);
@@ -96,7 +88,7 @@ export class CharacterView {
 
   /** Where the feet touch the floor, below the body centre. */
   get feet(): number {
-    return FEET * this.scale;
+    return FEET;
   }
 
   /**
@@ -106,12 +98,12 @@ export class CharacterView {
   get headTop(): number {
     const data = this.sheet ? (this.sprite.frame.customData as SheetFrameData | null) : null;
     const row = data?.headRow ?? (this.sheet ? SHEET_PAD : 0);
-    return this.sprite.y - this.sprite.displayHeight + row * PX * this.scale;
+    return this.sprite.y - this.sprite.displayHeight + row * PX;
   }
 
   /** Height of the person drawn (without the sheet frame's empty border). */
   private get artHeight(): number {
-    return this.sprite.displayHeight - (this.sheet ? 2 * PAD * this.scale : 0);
+    return this.sprite.displayHeight - (this.sheet ? 2 * PAD : 0);
   }
 
   /** Swaps the look (Dalton's disguise). Keeps the facing and animation. */
@@ -144,7 +136,7 @@ export class CharacterView {
     this.wasWorking = !!opts.working;
     this.container.setPosition(x, y).setDepth(sortDepth(y + this.feet));
 
-    const stride = (opts.running ? STRIDE.run : STRIDE.walk) * this.scale;
+    const stride = opts.running ? STRIDE.run : STRIDE.walk;
     let frame: string;
     let step = false;
     if (opts.pose === 'sleep' && this.has('sleep-0')) {
@@ -167,7 +159,7 @@ export class CharacterView {
     this.show(frame);
 
     // Without the hammering frames, at least wiggle while working.
-    this.sprite.x = opts.working && !this.has(`${this.facing}-work-0`) ? Math.sin(time / 45) * 2 * this.scale : 0;
+    this.sprite.x = opts.working && !this.has(`${this.facing}-work-0`) ? Math.sin(time / 45) * 2 : 0;
     this.placeSack(step);
   }
 
@@ -199,11 +191,11 @@ export class CharacterView {
     const sheet = `${this.key}_sheet`;
     this.sheet = this.scene.textures.exists(sheet) ? sheet : null;
     // The frame's bottom border hangs below the feet.
-    this.sprite.y = this.feet + (this.sheet ? PAD * this.scale : 0);
+    this.sprite.y = this.feet + (this.sheet ? PAD : 0);
     // A bigger person (Mr. Gravy) gets a bigger shadow.
     const frame = this.sheet ? this.scene.textures.getFrame(sheet, 'down-0') : null;
     const width = frame ? frame.width - 2 * PAD : SHADOW_FOR_WIDTH;
-    this.shadow.setScale((width / SHADOW_FOR_WIDTH) * this.scale);
+    this.shadow.setScale(width / SHADOW_FOR_WIDTH);
   }
 
   private has(frame: string): boolean {
@@ -230,30 +222,29 @@ export class CharacterView {
   private placeSack(step: boolean) {
     this.sack.setVisible(this.carry > 0);
     if (this.carry <= 0) return;
-    const s = this.scale;
-    const bob = step ? PX * s : 0;
+    const bob = step ? PX : 0;
     // Shoulders are half way down the person; the back's middle a little lower.
     const shoulders = this.feet - this.artHeight * 0.5;
     let x = 0;
-    let y = shoulders + 8 * s;
+    let y = shoulders + 8;
     let inFront = false;
     switch (this.facing) {
       case 'down':
-        x = 18 * s;
-        y = shoulders - 10 * s;
+        x = 18;
+        y = shoulders - 10;
         break;
       case 'up':
-        y = shoulders + 10 * s;
+        y = shoulders + 10;
         inFront = true;
         break;
       case 'left':
-        x = 20 * s;
+        x = 20;
         break;
       case 'right':
-        x = -20 * s;
+        x = -20;
         break;
     }
-    this.sack.setPosition(x, y + bob).setScale((0.65 + this.carry * 0.5) * s);
+    this.sack.setPosition(x, y + bob).setScale(0.65 + this.carry * 0.5);
     if (inFront !== this.sackInFront) {
       this.sackInFront = inFront;
       if (inFront) this.container.moveAbove(this.sack, this.sprite);

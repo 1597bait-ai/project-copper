@@ -421,6 +421,143 @@ function tree(): Pix {
   return p;
 }
 
+/** A riveted steel boiler (2x2 tiles): burner window aglow, pressure gauge, pipes up into the wall. */
+function boiler(): Pix {
+  const p = new Pix(32, 44);
+  const x0 = 4;
+  const w = 24;
+  const lidTop = 11;
+  const bodyTop = 15;
+  const bodyBottom = 37;
+  // Pipes up into the wall behind it: an insulated one (lagging with steel bands) and a copper one.
+  p.rect(7, 0, 5, lidTop + 3, 0xe4dfd0).vline(7, 0, lidTop + 3, 0xf4f0e6).vline(11, 0, lidTop + 3, 0xbdb5a0);
+  for (let y = 2; y < lidTop; y += 4) p.hline(7, y, 5, STEEL_D);
+  p.vline(20, 0, lidTop + 3, COPPER_L).vline(21, 0, lidTop + 3, COPPER).vline(22, 0, lidTop + 3, COPPER_D);
+  p.rect(18, 4, 7, 2, 0xd8443a).hline(18, 4, 7, 0xf0705f).set(21, 6, 0x9c2a22); // valve wheel
+  // The tank: lit from the left, so a bright streak a quarter of the way across, darker to the right.
+  for (let c = 0; c < w; c++) {
+    const t = c / (w - 1);
+    const col = t < 0.08 ? STEEL : t < 0.18 ? STEEL_L : t < 0.3 ? STEEL_HI : t < 0.4 ? STEEL_L : t < 0.66 ? STEEL : t < 0.86 ? STEEL_D : STEEL_DD;
+    p.vline(x0 + c, bodyTop, bodyBottom - bodyTop + 1, col);
+    // A riveted seam round the middle.
+    p.set(x0 + c, 24, shade(col, 0.2)).set(x0 + c, 25, shade(col, -0.25));
+    if (c % 3 === 1) p.set(x0 + c, 24, shade(col, -0.45));
+  }
+  // Rounded bottom corners.
+  p.erase(x0, bodyBottom).erase(x0 + 1, bodyBottom).erase(x0 + w - 1, bodyBottom).erase(x0 + w - 2, bodyBottom);
+  p.erase(x0, bodyBottom - 1).erase(x0 + w - 1, bodyBottom - 1);
+  // The domed lid seen from above: a rim, then the dome with its highlight.
+  p.ellipse(x0, lidTop, w, 9, STEEL_D);
+  p.ellipse(x0, lidTop - 1, w, 9, STEEL_L);
+  p.ellipse(x0 + 2, lidTop - 1, w - 9, 5, STEEL_HI);
+  p.ellipse(x0 + 4, lidTop, 5, 2, 0xffffff);
+  p.ellipse(x0 + 9, lidTop + 2, 6, 3, STEEL).ellipse(x0 + 10, lidTop + 2, 4, 2, STEEL_D); // manhole cover
+  // The pipes come out of the lid.
+  p.rect(7, lidTop - 1, 5, 2, 0xd2cbb8).rect(20, lidTop, 3, 2, COPPER_D);
+  // Pressure gauge: white dial with a red rim, the needle well into the red.
+  const gauge = fromRows(['.rrrr.', 'rwwwwr', 'rwwwkr', 'rwwkwr', 'rwwwwr', '.rrrr.'], { r: 0xd8443a, w: 0xffffff, k: 0x2b2f36 });
+  p.draw(gauge, 18, 17).set(20, 23, STEEL_DD);
+  // Burner door with the flame glowing through its window.
+  p.rect(9, 27, 11, 8, 0x4b535e).hline(9, 27, 11, 0x6b7480);
+  p.rect(10, 28, 9, 5, 0xe0602a).rect(11, 29, 7, 3, 0xffa040).rect(12, 30, 5, 1, 0xffe28a);
+  p.set(13, 29, 0xffe28a).set(16, 31, 0xffe28a);
+  p.hline(10, 33, 9, 0x2f353d).set(18, 30, STEEL_HI);
+  // A warning sticker and a plinth to stand on.
+  p.rect(6, 28, 2, 2, 0xf2c232).set(6, 29, 0x3a2e10);
+  p.rect(x0 + 1, 38, w - 2, 3, STEEL_DD).hline(x0 + 1, 38, w - 2, STEEL_D);
+  return finish(p, [2, 38, 29, 6]);
+}
+
+/** A red portable generator in a black tube frame (2x1 tiles): engine grille, outlets, fuel cap. */
+function generator(): Pix {
+  const p = new Pix(32, 24);
+  const redHi = 0xf47c6c;
+  const redL = 0xe65a4b;
+  const red = 0xd03e32;
+  const redD = 0xa22e26;
+  const redDD = 0x74201b;
+  const frame = 0x353a43;
+  const frameL = 0x5f6672;
+  // The box: its lit top, then the front.
+  p.rect(5, 4, 22, 6, redL).hline(5, 4, 22, redHi).vline(5, 4, 6, redHi);
+  p.rect(5, 10, 22, 10, red).hline(5, 10, 22, redD).vline(26, 4, 16, redD).hline(5, 19, 22, redD);
+  // Fuel cap and a little fuel gauge on top.
+  p.rect(8, 5, 3, 3, 0x2b2f36).set(8, 5, 0x6b7380);
+  p.rect(13, 6, 3, 2, 0xf4f1e6).set(14, 6, 0x2b2f36);
+  // Engine grille on the left of the front, control panel on the right.
+  for (let x = 7; x < 16; x += 2) p.vline(x, 12, 6, redDD).set(x, 12, redD);
+  p.rect(17, 12, 8, 6, STEEL_L).hline(17, 12, 8, STEEL_HI).hline(17, 17, 8, STEEL_D).vline(24, 12, 6, STEEL_D);
+  p.rect(18, 14, 2, 2, 0x2b2f36).rect(21, 14, 2, 2, 0x2b2f36).set(23, 13, 0x7ddc7d);
+  p.rect(6, 18, 3, 1, 0xf2c232);
+  // The tube frame round it: uprights, the top bar with grab handles, the base and the wheels.
+  p.rect(2, 1, 2, 20, frame).vline(2, 1, 20, frameL);
+  p.rect(28, 1, 2, 20, frame).vline(28, 1, 20, frameL);
+  p.rect(2, 1, 28, 2, frame).hline(2, 1, 28, frameL);
+  p.rect(2, 19, 28, 2, frame).hline(2, 19, 28, frameL);
+  for (const cx of [4, 27]) p.ellipse(cx - 3, 17, 6, 6, 0x22262c).set(cx, 20, STEEL_D).set(cx - 1, 19, STEEL_DD);
+  return finish(p, [1, 19, 30, 5]);
+}
+
+/** Pressure gauges on a pipe coming up out of the floor, with a red shut-off valve wheel. */
+function pressureGauges(): Pix {
+  const pal = { r: 0xd8443a, R: 0xf0705f, w: 0xffffff, W: 0xe6e9ee, k: 0x2b2f36, y: 0xf2c232, s: STEEL, S: STEEL_L, d: STEEL_D, D: STEEL_DD, v: 0xd8443a, V: 0x9c2a22, h: 0xf0705f };
+  const rows = [
+    '..rrrrrr........',
+    '.rRwwwwwr.......',
+    '.rwwwwwkr.......',
+    '.rwwwwkwr.......',
+    '.rwwwkwwr.......',
+    '.rWwwwwwr..rrr..',
+    '.rWWwwwWr.rwwwr.',
+    '..rrrrrr..rwkwr.',
+    '....Sd....rWwwr.',
+    '....Sd.....rrr..',
+    '....SSSSSSSSd...',
+    '....Sdddddddd...',
+    '....Sd..........',
+    '.hvvvvvvh.......',
+    '.vVVSdVVv.......',
+    '....Sd..........',
+    '....Sd..........',
+    '....Sd..........',
+    '..SSSSdd........',
+    '..ddddddD.......',
+  ];
+  const p = art(16, 26, rows, pal, 0, 4);
+  return finish(p, [1, 22, 10, 4]);
+}
+
+/** A restroom sink on the wall, with a mirror above it (on the wall itself). */
+function sink(): Pix {
+  const pal = { m: STEEL_D, g: 0xbfe3f5, G: 0xe6f6ff, b: 0x9ccbe6, k: STEEL_L, K: STEEL_HI, d: STEEL_DD, w: PORCELAIN_D, W: PORCELAIN, H: PORCELAIN_HI, s: WATER, S: WATER_D, p: PORCELAIN_DD };
+  const rows = [
+    '...mmmmmmmmmm...',
+    '...mGGgggggbm...',
+    '...mGgggggbbm...',
+    '...mggggbbbbm...',
+    '...mgggbbbbbm...',
+    '...mbbbbbbbbm...',
+    '...mmmmmmmmmm...',
+    '................',
+    '................',
+    '......KkkK......',
+    '.......Kd.......',
+    '..wWWWWkdWWWWw..',
+    '.wHHHHHHHHHHHHw.',
+    '.wHsssssssssWWw.',
+    '.wHsSSSSSSSsWWw.',
+    '.wWHsssssssWWWw.',
+    '..wWWWWWWWWWWw..',
+    '...wppppppppw...',
+    '.....pppppp.....',
+    '.......kd.......',
+    '.......kd.......',
+    '.......kd.......',
+  ];
+  const p = art(16, 26, rows, pal, 0, 0);
+  return finish(p, [4, 21, 8, 3]);
+}
+
 interface CarColor {
   key: string;
   body: number;
@@ -639,7 +776,18 @@ function glow(): Pix {
   return new Pix(16, 8).ellipse(0, 0, 16, 8, alpha(0xffffff, 0.3)).ellipse(2, 1, 12, 6, alpha(0xffffff, 0.25));
 }
 
-/** Recharge clock: frame i of 8 shows i eighths filled (green on dark). */
+/** Recharge clock frames, 'recharge-0' (empty) to 'recharge-8' (full), in the 'recharge' sheet. */
+export const RECHARGE_FRAMES = 8;
+
+const CLOCK_FACE = 0xf8f6ec;
+const CLOCK_FILL = 0x7ddc7d;
+const CLOCK_HAND = 0x3a414b;
+
+/**
+ * Recharge clock: a little clock face whose hand sweeps round, frame i of 8 showing i eighths
+ * filled green behind it. Frame 0 is an empty face with the hand at 12 (not a dark disc, which
+ * looked like a bomb).
+ */
 function rechargeFrame(i: number): Pix {
   const p = new Pix(9, 9);
   for (let y = 0; y < 9; y++) {
@@ -653,11 +801,20 @@ function rechargeFrame(i: number): Pix {
         continue;
       }
       // Angle clockwise from 12 o'clock, 0..1.
-      const a = ((Math.atan2(dx, -dy) / (Math.PI * 2) + 1) % 1);
-      p.set(x, y, a < i / 8 || (i === 8) ? 0x7ddc7d : 0x3a414b);
+      const a = (Math.atan2(dx, -dy) / (Math.PI * 2) + 1) % 1;
+      p.set(x, y, a < i / RECHARGE_FRAMES || i === RECHARGE_FRAMES ? CLOCK_FILL : CLOCK_FACE);
     }
   }
+  // The hand, from the middle to the edge of the green.
+  const angle = (i / RECHARGE_FRAMES) * Math.PI * 2;
+  p.set(4, 4, CLOCK_HAND);
+  for (const r of [1, 2, 2.8]) p.set(4 + Math.round(r * Math.sin(angle)), 4 - Math.round(r * Math.cos(angle)), CLOCK_HAND);
   return p;
+}
+
+/** Every recharge clock frame, empty (0) to full (RECHARGE_FRAMES). */
+export function rechargeFrames(): Pix[] {
+  return Array.from({ length: RECHARGE_FRAMES + 1 }, (_, i) => rechargeFrame(i));
 }
 
 // ---------------------------------------------------------------- the module
@@ -681,6 +838,10 @@ export function objectPix(): Record<string, Pix> {
     plant: plant(),
     trash_can: trashCan(),
     tree: tree(),
+    boiler: boiler(),
+    generator: generator(),
+    pressure_gauges: pressureGauges(),
+    sink: sink(),
     van: vanSide(),
     van_tall: vanFront(),
     door_locked: doorAcross(2, true),
@@ -701,9 +862,6 @@ export function objectPix(): Record<string, Pix> {
   return out;
 }
 
-/** Recharge clock frames, 'recharge-0' (empty) to 'recharge-8' (full), in the 'recharge' sheet. */
-export const RECHARGE_FRAMES = 8;
-
 export const objectArt: ArtModule = {
   keys: () => [...Object.keys(objectPix()), 'van_big', 'recharge'],
   paint: (textures: Phaser.Textures.TextureManager) => {
@@ -714,7 +872,7 @@ export const objectArt: ArtModule = {
     addSheet(
       textures,
       'recharge',
-      Array.from({ length: RECHARGE_FRAMES + 1 }, (_, i) => ({ name: `recharge-${i}`, pix: rechargeFrame(i) })),
+      rechargeFrames().map((pix, i) => ({ name: `recharge-${i}`, pix })),
     );
   },
 };

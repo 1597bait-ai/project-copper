@@ -4,6 +4,7 @@
 
 import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
+import { PREFERRED_FLOOR } from './autotile';
 import { DECOR_CHARS, FIXTURE_CHARS, OBJECT_BY_CHAR, isFloorChar, isWallChar, tileByChar } from './legend';
 import { parseMap, serializeMap, type ParsedMap, type TilePoint } from './mapText';
 
@@ -19,14 +20,18 @@ export const VAN_H = 2;
 
 const STOPS = '123456789';
 
-/** Decorations bigger than one tile (cars): map character -> size. Stamped whole, removed whole. */
+/** Every cell holding `ch`. */
+const cellsOf = (rows: readonly string[], ch: string): TilePoint[] =>
+  rows.flatMap((row, y) => [...row].flatMap((c, x) => (c === ch ? [{ x, y }] : [])));
+
+/** Decorations bigger than one tile (cars, the boiler, generators): map character -> size. Stamped whole, removed whole. */
 const BLOCKS: Record<string, { w: number; h: number }> = Object.fromEntries(
   Object.entries(DECOR_CHARS)
     .filter(([, id]) => DECOR[id].w * DECOR[id].h > 1)
     .map(([ch, id]) => [ch, { w: DECOR[id].w, h: DECOR[id].h }]),
 );
 
-/** True for tools that stamp a whole multi-tile decoration (a car). */
+/** True for tools that stamp a whole multi-tile decoration (a car, the boiler...). */
 export const isBlockTool = (ch: string) => ch in BLOCKS;
 
 /** The cells of the same character joined edge to edge with x,y, and their bounding box. */
@@ -127,26 +132,42 @@ export function floorUnder(rows: readonly string[], x: number, y: number): strin
   return '.';
 }
 
-/** The most common floor touching (edge to edge) any cell of `ch`, or null when none does. */
-function floorAround(rows: readonly string[], ch: string): string | null {
+/** How often each floor touches (edge to edge) one of `cells`. */
+function floorsAround(rows: readonly string[], cells: readonly TilePoint[]): Map<string, number> {
   const counts = new Map<string, number>();
-  rows.forEach((row, y) => {
-    for (let x = 0; x < row.length; x++) {
-      if (row[x] !== ch) continue;
-      for (const [nx, ny] of [
-        [x + 1, y],
-        [x - 1, y],
-        [x, y + 1],
-        [x, y - 1],
-      ]) {
-        const n = rows[ny]?.[nx];
-        if (n !== undefined && isFloorChar(n)) counts.set(n, (counts.get(n) ?? 0) + 1);
-      }
+  for (const { x, y } of cells) {
+    for (const [nx, ny] of [
+      [x + 1, y],
+      [x - 1, y],
+      [x, y + 1],
+      [x, y - 1],
+    ]) {
+      const n = rows[ny]?.[nx];
+      if (n !== undefined && isFloorChar(n)) counts.set(n, (counts.get(n) ?? 0) + 1);
     }
-  });
+  }
+  return counts;
+}
+
+/** The most common floor touching any of `cells`, or null when none does. */
+function floorAround(rows: readonly string[], cells: readonly TilePoint[]): string | null {
+  const counts = floorsAround(rows, cells);
   let best: string | null = null;
   for (const [floor, n] of counts) if (best === null || n > counts.get(best)!) best = floor;
   return best;
+}
+
+/**
+ * The floor a removed decoration (all of its cells) leaves behind: the floor it belongs on when
+ * that touches it (asphalt for a car, grass for a tree: PREFERRED_FLOOR, the floor the game draws
+ * under it), else the floor most common around it. So a car parked between parking lines leaves
+ * asphalt, not a stripe of lines.
+ */
+function floorUnderDecor(rows: readonly string[], cells: readonly TilePoint[]): string {
+  const { x, y } = cells[0];
+  const want = PREFERRED_FLOOR[rows[y][x]];
+  if (want && floorsAround(rows, cells).has(want)) return want;
+  return floorAround(rows, cells) ?? floorUnder(rows, x, y);
 }
 
 /** The lowest route stop (1-9) not on the map yet, or null when all nine are placed. */
@@ -179,9 +200,9 @@ function blockRect(rows: readonly string[], x: number, y: number, w: number, h: 
  * - ROUTE_STOP places the lowest unused stop 1-9 (nothing happens when all nine are used).
  * - VAN removes the old van and stamps a new 4x2 (or 2x4) block of V around x,y.
  * - ERASER removes a thing (leaving the floor that was under it) or turns a floor/wall into hallway.
- *   A removed van leaves the floor most common around it.
- * - Big decorations (cars) are stamped whole, w x h with the tapped tile at their top-left (pushed inside the map).
- * - Touching any cell of the van or a car with another tool removes the whole van or car, so it never ends up broken.
+ *   A removed van leaves the floor most common around it, a decoration the floor it belongs on.
+ * - Big decorations (cars, the boiler...) are stamped whole, w x h with the tapped tile at their top-left (pushed inside the map).
+ * - Touching any cell of the van or a big decoration with another tool removes all of it, so it never ends up broken.
  * - Things (except locked doors) can't go into a wall: that would leave a gap people walk and see through.
  * - Outside the map nothing happens.
  */
@@ -193,19 +214,24 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
   let message: string | undefined;
 
   // Things that are removed leave behind the floor they were drawn on (judged before this edit).
-  // A van is big, so it leaves the floor most common around it (a parking space, not stray lines).
+  // A van is big, so it leaves the floor most common around it (a parking space, not stray lines);
+  // decorations leave the floor they belong on (see floorUnderDecor).
   const clear = (cx: number, cy: number) => (grid[cy][cx] = floorUnder(rows, cx, cy));
   const removeAll = (target: string) => {
-    const around = target === VAN ? floorAround(rows, VAN) : null;
+    const around = target === VAN ? floorAround(rows, cellsOf(rows, VAN)) : null;
     rows.forEach((row, cy) => {
       for (let cx = 0; cx < row.length; cx++) if (row[cx] === target) grid[cy][cx] = around ?? floorUnder(rows, cx, cy);
     });
   };
-  /** Removes whatever big thing covers cx,cy (the van, or one car), so none is ever left broken. */
+  const removeDecor = (cells: readonly TilePoint[]) => {
+    const floor = cells.length ? floorUnderDecor(rows, cells) : '';
+    for (const c of cells) grid[c.y][c.x] = floor;
+  };
+  /** Removes whatever big thing covers cx,cy (the van, or one car, boiler...), so none is ever left broken. */
   const removeBig = (cx: number, cy: number) => {
     const ch = rows[cy][cx];
     if (ch === VAN) removeAll(VAN);
-    else for (const c of blockPiece(rows, cx, cy)) clear(c.x, c.y);
+    else removeDecor(blockPiece(rows, cx, cy));
   };
   const put = (value: string) => {
     removeBig(x, y);
@@ -244,6 +270,7 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
     message = `Route stop ${next}`;
   } else if (ch === ERASER) {
     if (current === VAN || isBlockTool(current)) removeBig(x, y);
+    else if (current in DECOR_CHARS) removeDecor([{ x, y }]);
     else if (isObject(current)) clear(x, y);
     else grid[y][x] = '.';
   } else if (ch === 'P' || ch === 'G' || (ch.length === 1 && STOPS.includes(ch))) {

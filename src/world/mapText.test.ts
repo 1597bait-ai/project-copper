@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseMap, serializeMap } from './mapText';
-import { validateMap } from './validate';
+import { DEFAULT_MAP } from './maps';
+import { inWallLine, validateMap } from './validate';
 
 const SMALL = `
 // a tiny test school
@@ -102,6 +103,31 @@ describe('map text format', () => {
     const gap = parseMap(SMALL.replace('B###.##LLB', 'B#d#.##LLB'));
     const { warnings } = validateMap(gap);
     expect(warnings.some((w) => w.startsWith('Desk at 2,4 sits in a gap between walls'))).toBe(true);
+  });
+
+  it('warns about a decoration typed into a wall line: people see through decorations', () => {
+    const gap = parseMap(SMALL.replace('B###.##LLB', 'B#*#.##LLB'));
+    expect(validateMap(gap).warnings.some((w) => w.startsWith('Potted plant at 2,4 sits in a wall'))).toBe(true);
+    // The shipped map has none (its trees stand in a strip between the fence and the school)...
+    const school = parseMap(DEFAULT_MAP.text);
+    expect(validateMap(school).warnings.filter((w) => w.includes('sits in a wall'))).toEqual([]);
+    // ...until a plant replaces the wall between classrooms 1 and 2.
+    const rows = [...school.rows];
+    rows[5] = rows[5].slice(0, 8) + '*' + rows[5].slice(9);
+    expect(validateMap(parseMap(rows.join('\n'))).warnings.some((w) => w.startsWith('Potted plant at 8,5 sits in a wall'))).toBe(true);
+  });
+
+  it('tells a gap in a wall line from a narrow strip between two walls', () => {
+    const walls = (rows: string[]) => (x: number, y: number) => rows[y]?.[x] === '#';
+    const one = { x: 1, y: 1, w: 1, h: 1 };
+    expect(inWallLine(one, walls(['...', '#.#', '...']))).toBe(true);
+    expect(inWallLine(one, walls(['.#.', '...', '.#.']))).toBe(true);
+    expect(inWallLine(one, walls(['###', '...', '###']))).toBe(false); // a corridor: the walls carry on
+    expect(inWallLine(one, walls(['#.#', '#.#', '#.#']))).toBe(false);
+    expect(inWallLine(one, walls(['...', '#..', '...']))).toBe(false);
+    // A 2x2 car whose top half fills a gap in a wall.
+    expect(inWallLine({ x: 1, y: 1, w: 2, h: 2 }, walls(['....', '#..#', '....', '....']))).toBe(true);
+    expect(inWallLine({ x: 1, y: 1, w: 2, h: 2 }, walls(['#..#', '#..#', '#..#', '#..#']))).toBe(false);
   });
 
   it('finds unreachable loot', () => {

@@ -98,6 +98,10 @@ const DECOR_LABELS: Record<string, string> = {
   trash_can: 'Trash can',
   tree: 'Tree',
   car: 'Car',
+  boiler: 'Boiler',
+  generator: 'Generator',
+  pressure_gauges: 'Gauges',
+  sink: 'Sink',
 };
 
 /** Every palette entry, in palette order. New tiles, fixtures and decorations in the legend show up automatically. */
@@ -1221,7 +1225,7 @@ export class EditorScene extends Phaser.Scene {
       if (!v || c.x < 0 || c.y < 0 || c.x >= this.parsed.width || c.y >= this.parsed.height) return;
       r = v;
     } else if (isBlockTool(t)) {
-      // Big decorations (cars) are stamped with the tapped tile at their top-left, pushed inside the map.
+      // Big decorations (cars, the boiler...) are stamped with the tapped tile at their top-left, pushed inside the map.
       const { w, h } = DECOR[DECOR_CHARS[t]];
       r = { x: Phaser.Math.Clamp(c.x, 0, this.parsed.width - w), y: Phaser.Math.Clamp(c.y, 0, this.parsed.height - h), w, h };
     }

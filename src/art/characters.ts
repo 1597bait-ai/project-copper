@@ -1265,7 +1265,8 @@ export const characterArt: ArtModule = {
     for (const [key, look] of Object.entries(LOOKS)) {
       const frames = characterFrames(look);
       const sheet = addSheet(textures, `${key}_sheet`, frames.map((f) => ({ name: f.name, pix: padded(f.pix) })));
-      for (const f of frames) (sheet.get(f.name).customData as SheetFrameData).headRow = SHEET_PAD + f.headRow;
+      // (Real art loaded in its place may not have every frame.)
+      for (const f of frames) if (sheet.has(f.name)) (sheet.get(f.name).customData as SheetFrameData).headRow = SHEET_PAD + f.headRow;
       addTexture(textures, key, frames.find((f) => f.name === 'down-0')!.pix);
       addTexture(textures, `${key}_big`, characterPortrait(look));
     }

@@ -62,6 +62,8 @@ async function serveFonts(context) {
 const LIB = String.raw`
 const T = 64;
 const B = window.__COPPER__.balance;
+/** The rules that turn stats into numbers (src/config/balance.ts). */
+const R = window.__COPPER__.rules;
 const DIRS = [[0, 1], [0, -1], [1, 0], [-1, 0]];
 const key = (t) => t.x + ',' + t.y;
 const center = (t) => ({ x: (t.x + 0.5) * T, y: (t.y + 0.5) * T });
@@ -404,13 +406,16 @@ if (runs('desktop')) {
   await G(`g.elapsed = ${len / 2 - 0.5};`);
   check("Mr. Gravy speeds up at half shift (he's had his coffee)", await waitFor('g.boss.speedMultiplier === B.shift.bossSpeedUpMultiplier', 2));
 
+  // Wait on the scene state itself (a busy machine can take a while to run the next frame).
+  const sceneIs = (state) =>
+    page
+      .waitForFunction((st) => (st === 'paused' ? window.__COPPER__.game.scene.isPaused('Game') : window.__COPPER__.game.scene.isActive('Game')), state, { timeout: 5000 })
+      .then(() => true, () => false);
   await tap('Escape');
-  await page.waitForTimeout(500);
-  check('Esc pauses', await page.evaluate(() => window.__COPPER__.game.scene.isPaused('Game')));
+  check('Esc pauses', await sceneIs('paused'));
   await shot('paused');
   await tap('Escape');
-  await page.waitForTimeout(500);
-  check('Esc resumes', await page.evaluate(() => window.__COPPER__.game.scene.isActive('Game')));
+  check('Esc resumes', await sceneIs('active'));
 
   await endShift();
   await shot('shift-over');
@@ -447,7 +452,7 @@ if (runs('desktop')) {
   check('crew select: Tomothy is on shift', tom.id === 'tomothy', tom);
   check('Tomothy scraps faster (repair 3 + 0.5 plumbing bonus)', Math.abs(tom.got - tom.want) < 0.01, tom);
   check("Tomothy's ability hides scrapping", await G('return g.player.isScrapping && g.player.lookingBusy && !g.player.suspicious;'));
-  check('Tomothy carries 3 and walks slower than Dalton', await G('return g.player.bag.capacity === 3 && g.player.speed === B.tilesPerSecond(1) * T;'));
+  check('Tomothy carries 3 and walks slower than Dalton', await G('return g.player.bag.capacity === 3 && g.player.speed === R.tilesPerSecond(1) * T;'));
 
   check('no console errors (desktop)', errors.length === 0, errors);
   await context.close();
@@ -565,7 +570,7 @@ if (runs('students')) {
     { followSpeed, walkSpeed, moved },
   );
   const sprint = Math.max(0, ...frames2.filter((f) => f[5] === 'respond').map((f) => f[6]));
-  const sprintWant = await G('return B.tilesPerSecond(g.boss.def.speed) * T * g.boss.speedMultiplier * B.boss.sprintFactor;');
+  const sprintWant = await G('return R.tilesPerSecond(g.boss.def.speed) * T * g.boss.speedMultiplier * B.boss.sprintFactor;');
   check("Mr. Gravy's sprint is faster than his chase", Math.abs(sprint - sprintWant) < 1, { sprint, sprintWant });
   const searched = frames2.find((f, i) => i > 0 && frames2[i - 1][5] === 'respond' && f[5] === 'search');
   check(
@@ -742,7 +747,10 @@ if (runs('phone')) {
   await sceneActive('Game');
   await wait(0.5);
   await G('calm();');
-  check('phone gets touch controls and a zoomed camera', await G('return h.touch && g.cameras.main.zoom > 1.3;'));
+  // Phones zoom in, but only so far: a tile stays within the camera's size limits (src/config/balance.ts).
+  const TILE_CSS = 'T * g.cameras.main.zoom * g.scale.canvasBounds.width / g.scale.width';
+  const tileFits = `(${TILE_CSS}) >= B.camera.minTileCssPx - 0.5 && (${TILE_CSS}) <= B.camera.maxTileCssPx + 0.5`;
+  check('phone gets touch controls and a zoomed camera', await waitFor(`h.touch && g.cameras.main.zoom > 1 && ${tileFits}`, 1), await G(`return { touch: h.touch, zoom: g.cameras.main.zoom, tileCss: ${TILE_CSS.replace(/T \*/, '64 *')} };`));
 
   // Somewhere with open floor to the east to walk into.
   await G('const r = openRow(6); put(g.player.body, r);');
@@ -804,7 +812,12 @@ if (runs('portrait')) {
   await G("standBy('drinking_fountain');");
   await wait(1.5);
   await shot('game');
-  check('portrait: zoomed camera, larger HUD, scrap prompt', await G(`return g.cameras.main.zoom > 2 && h.ui > 2 && g.hud.action === 'SCRAP';`));
+  const TILE_CSS = 'T * g.cameras.main.zoom * g.scale.canvasBounds.width / g.scale.width';
+  check(
+    'portrait: zoomed camera, larger HUD, scrap prompt',
+    await waitFor(`g.cameras.main.zoom > 1 && (${TILE_CSS}) >= B.camera.minTileCssPx - 0.5 && (${TILE_CSS}) <= B.camera.maxTileCssPx + 0.5 && h.ui > 2 && g.hud.action === 'SCRAP'`, 1),
+    await G(`return { zoom: g.cameras.main.zoom, tileCss: ${TILE_CSS.replace(/T \*/, '64 *')}, ui: h.ui, action: g.hud.action };`),
+  );
 
   // A tap on the dialog box finishes the typing, a second tap closes it.
   await G("g.dialog({ speaker: 'Test', text: 'A long line to read on a phone held upright, typed out a letter at a time.', seconds: 60 });");
@@ -817,7 +830,8 @@ if (runs('portrait')) {
   await shot('dialog');
   await page.touchscreen.tap(mid.x, mid.y);
   check('...and a second tap closes it', await waitFor('!h.dialog.open', 1));
-  check("...without moving Dalton (it isn't the joystick)", await G('return g.hud.action === "SCRAP";'));
+  // While the box is up the action button reads NEXT; once it closes Dalton should still be by the fountain.
+  check("...without moving Dalton (it isn't the joystick)", await waitFor('g.hud.action === "SCRAP"', 1), await G('return { action: g.hud.action, prompt: g.hud.prompt, x: g.player.x, y: g.player.y };'));
 
   await endShift();
   await shot('shift-over');

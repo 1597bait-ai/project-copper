@@ -1,5 +1,19 @@
 // Pure text helpers for the pixel font (no Phaser, so they're unit tested). theme.ts uses them.
 
+/** The pixel font for all text. */
+export const FONT_NAME = 'Pixelify Sans';
+/**
+ * Pixelify Sans's 5 looks just like its S ("$50" reads "$S0", "7:05" reads "7:0S"), so digits come
+ * from Jersey 15, a pixel font whose 5, 6, 8 and 9 stay clear even small, and look right next to
+ * Pixelify's letters. Only its digits are used: every other character falls through to Pixelify
+ * Sans. To try another digits font, put its file in src/assets/fonts/ (see fontFileName) and
+ * change this name.
+ */
+export const DIGITS_FONT_NAME = 'Jersey 15';
+
+/** The file a bundled font is in, in src/assets/fonts/: its name in lower case, dashes for spaces. */
+export const fontFileName = (family: string): string => `${family.trim().toLowerCase().replace(/\s+/g, '-')}.woff2`;
+
 /** True for dark CSS colours ('#333', '#14161c'): those get a light shadow and no outline. */
 export function isDarkColor(css: string): boolean {
   const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(css.trim());

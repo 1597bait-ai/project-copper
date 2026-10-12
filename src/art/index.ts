@@ -4,8 +4,6 @@
 import type Phaser from 'phaser';
 import { characterArt } from './characters';
 import { objectArt } from './objects';
-import { rasterizeSprites } from './rasterize';
-import { allSprites } from './sprites';
 import { tileArt } from './tiles';
 import { uiArt } from './ui';
 
@@ -20,14 +18,20 @@ export const ART_MODULES: ArtModule[] = [tileArt, objectArt, characterArt, uiArt
 
 /** Every texture key the art provides. */
 export function artKeys(): string[] {
-  return [...new Set([...ART_MODULES.flatMap((m) => m.keys()), ...allSprites().map((s) => s.key)])];
+  return [...new Set(ART_MODULES.flatMap((m) => m.keys()))];
 }
 
-/** Makes every texture. Anything not drawn as pixel art yet falls back to the old vector art. */
-export async function generateArt(textures: Phaser.Textures.TextureManager): Promise<void> {
-  for (const m of ART_MODULES) m.paint(textures);
-  await rasterizeSprites(
-    textures,
-    allSprites().filter((s) => !textures.exists(s.key)),
-  );
+/**
+ * Makes every texture, one module at a time. Drawing a module blocks the page for a moment (up
+ * to a second on a slow phone), so before each one it waits for `beforeEach(done, total)`: the
+ * boot screen shows its progress there and lets the browser draw it.
+ */
+export async function generateArt(
+  textures: Phaser.Textures.TextureManager,
+  beforeEach: (done: number, total: number) => void | Promise<void> = () => {},
+): Promise<void> {
+  for (const [i, m] of ART_MODULES.entries()) {
+    await beforeEach(i, ART_MODULES.length);
+    m.paint(textures);
+  }
 }

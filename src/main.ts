@@ -1,11 +1,16 @@
 import Phaser from 'phaser';
-import { BALANCE } from './config/balance';
+import { BALANCE, bagCapacity, tilesPerSecond } from './config/balance';
+import { activeTuning, applyTuning, readEmbeddedTuning } from './config/tuning';
 import { BootScene } from './scenes/BootScene';
 import { EditorScene } from './scenes/EditorScene';
 import { GameScene } from './scenes/GameScene';
 import { HudScene } from './scenes/HudScene';
 import { MenuScene } from './scenes/MenuScene';
 import { ShiftEndScene } from './scenes/ShiftEndScene';
+
+// The page carries the tuning saved in Copper Studio (src/studio/): apply it before anything reads the config.
+const embedded = readEmbeddedTuning();
+for (const warning of [...embedded.warnings, ...applyTuning(embedded.file)]) console.warn(`[tuning] ${warning}`);
 
 // The game is laid out at 1920x1080 and EXPANDs to fill any landscape screen (phones, tablets,
 // monitors) without letterboxing: wider screens simply see more of the school.
@@ -28,7 +33,12 @@ const game = new Phaser.Game({
 // tuning numbers from here, so editing src/config/balance.ts never breaks it).
 declare global {
   interface Window {
-    __COPPER__?: { game: Phaser.Game; balance: typeof BALANCE };
+    __COPPER__?: {
+      game: Phaser.Game;
+      balance: typeof BALANCE;
+      rules: { tilesPerSecond: typeof tilesPerSecond; bagCapacity: typeof bagCapacity };
+      tuning: typeof activeTuning;
+    };
   }
 }
-window.__COPPER__ = { game, balance: BALANCE };
+window.__COPPER__ = { game, balance: BALANCE, rules: { tilesPerSecond, bagCapacity }, tuning: activeTuning };

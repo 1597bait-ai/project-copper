@@ -1,7 +1,8 @@
-// Decorations: plants, trash cans, trees and parked cars. Nobody can walk through them, but
-// everyone can see past them (they're lower than eye level, or you can see between the leaves).
+// Decorations: plants, trash cans, trees, parked cars, the boiler room's machines and restroom
+// sinks. Nobody can walk through them, but everyone can see past them (only walls and closed doors
+// block sight, so they never make a hiding place).
 // To add one: add an entry here, give it a map character in src/world/legend.ts (DECOR_CHARS)
-// and draw it in the art (src/art/).
+// and draw it under the same key in objectPix() (src/art/objects.ts).
 
 export interface DecorDef {
   id: string;
@@ -18,4 +19,8 @@ export const DECOR: Record<string, DecorDef> = {
   trash_can: { id: 'trash_can', name: 'Trash can', mapName: 'Trash can', w: 1, h: 1 },
   tree: { id: 'tree', name: 'Tree', mapName: 'Tree', w: 1, h: 1 },
   car: { id: 'car', name: 'Parked car', mapName: 'Parked car (fill a 2x2 block)', w: 2, h: 2 },
+  boiler: { id: 'boiler', name: 'Boiler', mapName: 'Boiler (fill a 2x2 block)', w: 2, h: 2 },
+  generator: { id: 'generator', name: 'Generator', mapName: 'Generator (fill a 2x1 block)', w: 2, h: 1 },
+  pressure_gauges: { id: 'pressure_gauges', name: 'Pressure gauges', mapName: 'Pressure gauges', w: 1, h: 1 },
+  sink: { id: 'sink', name: 'Sink', mapName: 'Sink (with a wall above it)', w: 1, h: 1 },
 };

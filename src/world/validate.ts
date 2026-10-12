@@ -2,10 +2,11 @@
 // (refuses to start a broken map) and the map editor (shows problems while you draw).
 
 import { TILE } from '../config/balance';
+import { DECOR } from '../config/decor';
 import { FIXTURES } from '../config/fixtures';
 import { Grid } from '../systems/Grid';
 import { findPath } from '../systems/pathfinding';
-import type { ParsedMap, TilePoint } from './mapText';
+import type { ParsedMap, TilePoint, TileRect } from './mapText';
 
 export interface MapReport {
   /** The map can't be played until these are fixed. */
@@ -138,5 +139,30 @@ export function validateMap(map: ParsedMap): MapReport {
       warnings.push(`${FIXTURES[f.id]?.name ?? f.id} at ${f.x},${f.y} sits in a gap between walls, so it works like a doorway; put it on the floor next to the wall`);
     }
   }
+  // Decorations never block sight, so one typed into a wall line is a window through the wall.
+  for (const d of map.decor) {
+    if (inWallLine(d, wallAt)) {
+      warnings.push(`${DECOR[d.id]?.name ?? d.id} at ${d.x},${d.y} sits in a wall: people can see through it; put it on the floor next to the wall`);
+    }
+  }
   return { errors, warnings };
+}
+
+/**
+ * True when the thing covering `r` fills a gap in a wall line: walls end on both sides of it (in
+ * the same row or column), and don't carry on past it. A tree in a one-tile strip between two
+ * walls isn't in a wall: those walls carry on beside it.
+ */
+export function inWallLine(r: TileRect, wallAt: (x: number, y: number) => boolean): boolean {
+  const left = r.x - 1;
+  const right = r.x + r.w;
+  for (let y = r.y; y < r.y + r.h; y++) {
+    if (wallAt(left, y) && wallAt(right, y) && !(wallAt(left, y - 1) && wallAt(right, y - 1)) && !(wallAt(left, y + 1) && wallAt(right, y + 1))) return true;
+  }
+  const top = r.y - 1;
+  const bottom = r.y + r.h;
+  for (let x = r.x; x < r.x + r.w; x++) {
+    if (wallAt(x, top) && wallAt(x, bottom) && !(wallAt(x - 1, top) && wallAt(x - 1, bottom)) && !(wallAt(x + 1, top) && wallAt(x + 1, bottom))) return true;
+  }
+  return false;
 }

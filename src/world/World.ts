@@ -74,7 +74,7 @@ export class World {
   readonly solids: Phaser.Physics.Arcade.StaticGroup;
   readonly fixtures: Fixture[] = [];
   readonly doors: Door[] = [];
-  /** Plants, trash cans, trees and parked cars. */
+  /** Decorations: plants, trash cans, trees, parked cars, the boiler... */
   readonly decor: Phaser.GameObjects.Image[] = [];
   readonly rooms: Room[];
   readonly patrol: Point[];

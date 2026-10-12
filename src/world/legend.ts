@@ -74,6 +74,10 @@ export const DECOR_CHARS: Record<string, string> = {
   u: 'trash_can',
   T: 'tree',
   C: 'car',
+  O: 'boiler',
+  Z: 'generator',
+  Q: 'pressure_gauges',
+  s: 'sink',
 };
 
 export type ObjectKind = 'player' | 'boss' | 'student' | 'van' | 'door' | 'patrol' | 'fixture' | 'decor';

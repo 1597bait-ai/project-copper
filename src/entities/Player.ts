@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BALANCE, TILE } from '../config/balance';
+import { TILE, bagCapacity, tilesPerSecond } from '../config/balance';
 import { ABILITIES, type AbilityDef, type CharacterDef } from '../config/characters';
 import { Bag } from '../systems/Bag';
 import { CharacterView } from './CharacterView';
@@ -40,8 +40,8 @@ export class Player {
 
     this.view = new CharacterView(scene, character.sprite, x, y);
 
-    this.bag = new Bag(BALANCE.bagCapacity(character.stats.carry));
-    this.speed = BALANCE.tilesPerSecond(character.stats.speed) * TILE;
+    this.bag = new Bag(bagCapacity(character.stats.carry));
+    this.speed = tilesPerSecond(character.stats.speed) * TILE;
     this.ability = character.ability ? ABILITIES[character.ability] : null;
   }
 

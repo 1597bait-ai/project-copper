@@ -229,17 +229,29 @@ function paintInto(canvas: HTMLCanvasElement, pix: Pix, ox: number, oy: number, 
   ctx.putImageData(img, ox, oy);
 }
 
-/** Registers a Pix as a texture (replacing any texture with that key). Pixel art stays crisp (nearest filtering). */
-export function addTexture(textures: Phaser.Textures.TextureManager, key: string, pix: Pix, scale = PX): Phaser.Textures.Texture {
-  if (textures.exists(key)) textures.remove(key);
-  const tex = textures.addCanvas(key, toCanvas(pix, scale))!;
+/**
+ * Registers a finished canvas as a texture, with crisp (nearest) filtering. A plain texture, not a
+ * CanvasTexture: that one reads every pixel back into a second copy (slow at boot, and memory).
+ */
+function register(textures: Phaser.Textures.TextureManager, key: string, canvas: HTMLCanvasElement): Phaser.Textures.Texture {
+  const tex = textures.create(key, canvas, canvas.width, canvas.height)!;
+  tex.add('__BASE', 0, 0, 0, canvas.width, canvas.height);
   tex.setFilter(0 /* Phaser.Textures.FilterMode.NEAREST */);
   return tex;
 }
 
 /**
+ * Registers a Pix as a texture. A texture already loaded under that key wins (real art loaded in
+ * BootScene.preload() replaces the generated art), and is returned instead.
+ */
+export function addTexture(textures: Phaser.Textures.TextureManager, key: string, pix: Pix, scale = PX): Phaser.Textures.Texture {
+  return textures.exists(key) ? textures.get(key) : register(textures, key, toCanvas(pix, scale));
+}
+
+/**
  * Registers equal-sized frames as one texture with named frames (e.g. "down-0", "left-2"),
  * laid out in rows of `columns`. Use with `scene.add.image(x, y, key, 'down-0')` or setFrame().
+ * Like addTexture, a texture already loaded under that key wins.
  */
 export function addSheet(
   textures: Phaser.Textures.TextureManager,
@@ -249,6 +261,7 @@ export function addSheet(
   columns = 12,
 ): Phaser.Textures.Texture {
   if (!frames.length) throw new Error(`Sheet ${key} has no frames`);
+  if (textures.exists(key)) return textures.get(key);
   const fw = frames[0].pix.w * scale;
   const fh = frames[0].pix.h * scale;
   const cols = Math.min(columns, frames.length);
@@ -259,9 +272,7 @@ export function addSheet(
     if (f.pix.w * scale !== fw || f.pix.h * scale !== fh) throw new Error(`Sheet ${key}: frame ${f.name} is a different size`);
     paintInto(canvas, f.pix, (i % cols) * fw, Math.floor(i / cols) * fh, scale);
   });
-  if (textures.exists(key)) textures.remove(key);
-  const tex = textures.addCanvas(key, canvas)!;
+  const tex = register(textures, key, canvas);
   frames.forEach((f, i) => tex.add(f.name, 0, (i % cols) * fw, Math.floor(i / cols) * fh, fw, fh));
-  tex.setFilter(0 /* Phaser.Textures.FilterMode.NEAREST */);
   return tex;
 }

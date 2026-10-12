@@ -9,11 +9,13 @@ import type { Door } from '../entities/Door';
 import type { Fixture } from '../entities/Fixture';
 import { Player } from '../entities/Player';
 import { SleepyCoworker, type CoworkerEvent } from '../entities/SleepyCoworker';
-import { drawPixelBox } from '../entities/SpeechBubble';
+import { drawPixelBox, type EmoteKind } from '../entities/SpeechBubble';
 import { Student, type StudentYell } from '../entities/Student';
 import { controls, oncePerKeyEvent } from '../input/Controls';
 import { AlertTimer } from '../systems/alert';
 import { mergeContents, roundMoney, saleValue, type ScrapContents } from '../systems/Bag';
+import { coveredMarks, stackBubbles, type Box } from '../systems/bubbleLayout';
+import { markScale, tileCssPx } from '../systems/camera';
 import { clockText } from '../systems/clock';
 import { besideDesk, coworkerLine, coworkerWakes } from '../systems/coworker';
 import { effectiveRepair, rollRecharge, rollYield, scrapSeconds } from '../systems/scrapping';
@@ -47,6 +49,9 @@ export interface ShiftSummary {
 
 type Target = { kind: 'fixture'; fixture: Fixture } | { kind: 'door'; door: Door };
 
+/** A speech bubble moves up at most this far (world px) to get out of another's way; any higher and it waits. */
+const BUBBLE_MAX_LIFT = 180;
+
 /** Everything the HUD needs, refreshed every frame. */
 export interface HudState {
   money: number;
@@ -68,6 +73,20 @@ export interface HudState {
   characterName: string;
   /** Word got around after a student reported you: every student is on high alert until it runs out. */
   alert: { left: number; total: number } | null;
+  /**
+   * Everyone onto Dalton: where they are on screen (px), their mark ('!' after him, '?' unsure)
+   * and its colour. The HUD points at the ones out of sight with markers at the screen's edge.
+   */
+  threats: Threat[];
+  /** Where Dalton is on screen (px). */
+  me: { x: number; y: number };
+}
+
+export interface Threat {
+  x: number;
+  y: number;
+  mark: EmoteKind;
+  color?: number;
 }
 
 /** A line of dialog shown in the HUD's dialog box (emitted as the 'dialog' event). */
@@ -109,6 +128,8 @@ export class GameScene extends Phaser.Scene {
    * (the 'dialogNext' event) instead of scrapping, like the A button in the GBA games.
    */
   dialogOpen = false;
+  /** Set by the HUD: how far down the screen (px) its top row of windows reaches. */
+  hudTop = 0;
   /** The sleepy coworker while he's around (one at a time). */
   coworker: SleepyCoworker | null = null;
   /**
@@ -118,6 +139,11 @@ export class GameScene extends Phaser.Scene {
   coworkerChance: number = BALANCE.sleepyCoworker.chance;
   private coworkersMet = 0;
   private hushMoney = 0;
+  /**
+   * How much bigger speech bubbles, '!' marks, the scrap bar and floating text are drawn: above 1
+   * when a phone's camera zooms out, so they keep a readable size on screen (see fitCamera).
+   */
+  overheadScale = 1;
   /** Shift time each kind of toast last showed, so a crowd of yelling students doesn't spam. */
   private toastAt: Record<string, number> = {};
   private channelBar!: Phaser.GameObjects.Graphics;
@@ -433,28 +459,38 @@ export class GameScene extends Phaser.Scene {
       return;
     }
     const wasResponding = boss.state === 'respond';
-    if (boss.respondTo(yell.seen) && !wasResponding) {
+    const coming = boss.respondTo(yell.seen) && !wasResponding;
+    if (coming) {
       sfx.report();
       boss.say(GRAVY_LINES.heard[Math.floor(Math.random() * GRAVY_LINES.heard.length)], 1.4);
-      // Short enough for one line on a portrait phone: the HUD stacks toasts one line apart.
+    }
+    const news = yellRaisesAlarm(yell.why) && this.raiseAlarm(s, !coming);
+    // One short toast for the lot (one line even on a phone held sideways): the HUD's banner says
+    // the rest, and a stack of toasts would cover the yelling student.
+    if (coming && news) {
+      // (It counts as the 'heard' toast, so another yell right after doesn't repeat it.)
+      this.toastAt.heard = this.elapsed;
+      this.toast(`${NPCS.mr_gravy.name} heard! HIGH ALERT!`, '#ff8a5a', 3400);
+    } else if (coming) {
       this.throttledToast('heard', `${NPCS.mr_gravy.name} heard! He's on his way!`, '#ff8a5a');
     }
-    if (yellRaisesAlarm(yell.why)) this.raiseAlarm(s);
   }
 
   /**
    * Starts (or restarts) the high alert. When it's news, the students start talking about it, the
-   * ones nearest `from` (where the yell came from) first. Public so tests can set it off.
+   * ones nearest `from` (where the yell came from) first, and (with `announce`) a toast says so.
+   * Returns whether it's news. Public so tests can set it off.
    */
-  raiseAlarm(from: { x: number; y: number } = this.player): void {
+  raiseAlarm(from: { x: number; y: number } = this.player, announce = true): boolean {
     const s = BALANCE.students;
-    if (!this.alert.start(s.highAlertSeconds)) return;
+    if (!this.alert.start(s.highAlertSeconds)) return false;
     sfx.alert();
-    this.toast('Word got around: the students are on HIGH ALERT!', '#ff8a5a', 3400);
+    if (announce) this.toast('Word got around: HIGH ALERT!', '#ff8a5a', 3400);
     const dist = this.students.map((st) => Phaser.Math.Distance.Between(st.x, st.y, from.x, from.y));
     const delays = chatterDelays(dist, s.chatterGapSeconds, s.chatterJitterSeconds, Math.random);
     // A short beat first, so the yell itself is heard before the chatter.
     this.students.forEach((st, i) => st.queueChatter(0.8 + delays[i]));
+    return true;
   }
 
   /** A toast that shows at most once every few seconds per `kind`. */
@@ -535,13 +571,20 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Zoom in on small physical screens (phones, portrait) so a tile stays about 34 CSS pixels wide.
-   * The camera may scroll a little past the map's top and bottom so the HUD bands never hide the
-   * van or an edge room, and a map smaller than the screen sits in the middle.
+   * Zoom in on small physical screens (phones), but only so far: from Dalton to the nearer screen
+   * edge there's room for every student who could see him, as far as a readable tile size allows
+   * (BALANCE.camera; the HUD's edge markers point at anyone beyond). Bubbles and marks over
+   * people's heads grow to match. The camera may scroll a little past the map's top and bottom so
+   * the HUD bands never hide the van or an edge room, and a map smaller than the screen sits in
+   * the middle.
    */
   private fitCamera() {
     const cam = this.cameras.main;
-    cam.setZoom(Phaser.Math.Clamp(34 / (TILE * cssPerGamePixel(this.scale)), 1, 3));
+    const k = cssPerGamePixel(this.scale);
+    const st = BALANCE.students;
+    const tile = tileCssPx(Math.min(this.scale.width, this.scale.height) * k, st.visionRangeTiles * st.highAlertRangeFactor, BALANCE.camera);
+    cam.setZoom(Phaser.Math.Clamp(tile / (TILE * k), 1, 3));
+    this.overheadScale = markScale(TILE * cam.zoom * k, BALANCE.camera);
     if (!this.world) return;
     const vw = cam.width / cam.zoom;
     const vh = cam.height / cam.zoom;
@@ -670,12 +713,39 @@ export class GameScene extends Phaser.Scene {
     if (!this.player) return;
     const time = this.time.now;
     const view = this.cameras.main.worldView;
+    const size = this.overheadScale;
     this.player.syncView(time);
-    this.boss.syncView(time, view);
-    for (const s of this.students) s.syncView(time, view);
-    this.coworker?.syncView(time);
+    this.boss.syncView(time, view, size);
+    for (const s of this.students) s.syncView(time, view, size);
+    this.coworker?.syncView(time, size);
+    this.layoutOverheads(view);
 
     this.drawChannelBar();
+  }
+
+  /**
+   * When people bunch up, keeps what's over their heads readable: speech bubbles move up out of
+   * each other's way (the newest shout keeps its place) and a '!' / '?' under a bubble hides.
+   */
+  private layoutOverheads(view: Phaser.Geom.Rectangle) {
+    const size = this.overheadScale;
+    const speakers = [this.boss, ...this.students];
+    const talking = speakers.map((p) => p.bubble).filter((b) => b.bounds);
+    const boxes = talking.map((b) => b.bounds!);
+    // A bubble that would have to go up under the HUD's top windows waits instead.
+    const top = view.y + this.hudTop / this.cameras.main.zoom + PX * size;
+    const bubbles = boxes.map((box, i) => ({ ...box, rank: talking[i].rank }));
+    const lifts = stackBubbles(bubbles, { gap: PX * size, maxLift: BUBBLE_MAX_LIFT * size, top });
+    const shown: Box[] = [];
+    talking.forEach((b, i) => {
+      const lift = lifts[i];
+      b.lift(lift);
+      if (lift !== null) shown.push({ ...boxes[i], y: boxes[i].y - lift });
+    });
+    const marks = speakers.map((p) => p.emote);
+    if (this.coworker) marks.push(this.coworker.emote);
+    const covered = coveredMarks(marks.map((m) => m.bounds), shown);
+    marks.forEach((m, i) => m.cover(covered[i]));
   }
 
   /** The scrap / unlock progress bar over Dalton's head, drawn like a Gen 3 HP bar on the art pixel grid. */
@@ -684,12 +754,12 @@ export class GameScene extends Phaser.Scene {
     g.clear();
     const ch = this.player.channel;
     if (!ch) return;
-    const P = PX;
+    const P = PX * this.overheadScale;
     const w = 24 * P;
     const h = 6 * P;
     const x = Math.round((this.player.x - w / 2) / P) * P;
-    const y = Math.round((this.player.y + this.player.view.headTop - 8 * P) / P) * P;
-    drawPixelBox(g, x, y, w, h);
+    const y = Math.round((this.player.y + this.player.view.headTop - 2 * PX - h) / P) * P;
+    drawPixelBox(g, x, y, w, h, P);
     const inner = w - 4 * P;
     g.fillStyle(0x485060, 1).fillRect(x + 2 * P, y + 2 * P, inner, 2 * P);
     const fill = Math.round((inner * Math.min(1, ch.elapsed / ch.duration)) / P) * P;
@@ -706,8 +776,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   floatText(x: number, y: number, text: string, color: string, duration = 1200): void {
-    const t = this.add.text(x, y, text, textStyle(30, color)).setOrigin(0.5).setDepth(DEPTH.floatText);
-    this.tweens.add({ targets: t, y: y - 70, alpha: { from: 1, to: 0 }, ease: 'Cubic.Out', duration, onComplete: () => t.destroy() });
+    const size = this.overheadScale;
+    const t = this.add.text(x, y, text, textStyle(30 * size, color)).setOrigin(0.5).setDepth(DEPTH.floatText);
+    this.tweens.add({ targets: t, y: y - 70 * size, alpha: { from: 1, to: 0 }, ease: 'Cubic.Out', duration, onComplete: () => t.destroy() });
   }
 
   private buildHudState(): HudState {
@@ -729,6 +800,8 @@ export class GameScene extends Phaser.Scene {
       danger: 0,
       characterName: p.character.name,
       alert: null,
+      threats: [],
+      me: { x: 0, y: 0 },
     };
   }
 
@@ -748,6 +821,14 @@ export class GameScene extends Phaser.Scene {
     const studentDanger = Math.max(0, ...this.students.map((s) => s.danger));
     h.danger = Math.max(bossDanger, studentDanger);
     h.alert = this.alert.hud();
+    // Screen positions (the camera's view as last drawn: a frame behind at most).
+    const cam = this.cameras.main;
+    const view = cam.worldView;
+    const onScreen = (x: number, y: number) => ({ x: (x - view.x) * cam.zoom, y: (y - view.y) * cam.zoom });
+    h.me = onScreen(p.x, p.y);
+    h.threats = [];
+    if (this.boss.alarm) h.threats.push({ ...onScreen(this.boss.x, this.boss.y), mark: this.boss.alarm, color: this.boss.alarmColor });
+    for (const s of this.students) if (s.alarm) h.threats.push({ ...onScreen(s.x, s.y), mark: s.alarm });
     h.ability = p.ability
       ? {
           name: p.ability.name,

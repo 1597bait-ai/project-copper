@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BALANCE, TILE } from '../config/balance';
+import { BALANCE, TILE, bossVisionHalfAngleDeg, bossVisionRangeTiles, tilesPerSecond } from '../config/balance';
 import type { NpcDef } from '../config/npcs';
 import { clearLine, findPath, smoothPath, type Point } from '../systems/pathfinding';
 import { conePolygon, inCone, type Cone } from '../systems/vision';
@@ -7,7 +7,8 @@ import { DEPTH } from '../ui/depth';
 import type { World } from '../world/World';
 import { CharacterView } from './CharacterView';
 import type { Player } from './Player';
-import { Emote, SpeechBubble } from './SpeechBubble';
+import { Emote, SpeechBubble, type EmoteKind } from './SpeechBubble';
+import { CONE_LOOKS, drawCone, fadedCone } from './visionCone';
 
 const RADIUS = TILE * 0.3;
 /** His '!' turns orange while he sprints to a student's yell (it's the default red while chasing). */
@@ -29,8 +30,9 @@ export class Boss {
   readonly zone: Phaser.GameObjects.Zone;
   readonly body: Phaser.Physics.Arcade.Body;
   readonly view: CharacterView;
-  private readonly emote: Emote;
-  private readonly bubble: SpeechBubble;
+  /** The '!' / '?' over his head, and what he says (GameScene keeps them out of others' way). */
+  readonly emote: Emote;
+  readonly bubble: SpeechBubble;
   private readonly cone: Phaser.GameObjects.Graphics;
   /** Seconds left of shouting (pose 'yell') with his speech bubble up. */
   private shoutLeft = 0;
@@ -74,9 +76,9 @@ export class Boss {
     this.emote = new Emote(scene);
     this.bubble = new SpeechBubble(scene, 300);
 
-    this.range = BALANCE.boss.visionRangeTiles(def.awareness) * TILE;
-    this.halfAngle = Phaser.Math.DegToRad(BALANCE.boss.visionHalfAngleDeg(def.awareness));
-    this.chaseSpeed = BALANCE.tilesPerSecond(def.speed) * TILE;
+    this.range = bossVisionRangeTiles(def.awareness) * TILE;
+    this.halfAngle = Phaser.Math.DegToRad(bossVisionHalfAngleDeg(def.awareness));
+    this.chaseSpeed = tilesPerSecond(def.speed) * TILE;
   }
 
   // Read the body: it moves in the physics step before update() runs, and the zone only catches up
@@ -91,6 +93,16 @@ export class Boss {
 
   get visionCone(): Cone {
     return { origin: { x: this.x, y: this.y }, facing: this.facing, range: this.range, halfAngle: this.halfAngle };
+  }
+
+  /** His mark while he's onto Dalton: '!' chasing or on his way to a yell, '?' unsure or searching. */
+  get alarm(): EmoteKind | null {
+    return this.state === 'chase' || this.state === 'respond' ? '!' : this.state === 'alert' || this.state === 'search' ? '?' : null;
+  }
+
+  /** The colour of his mark: orange while he sprints to a student's yell. */
+  get alarmColor(): number | undefined {
+    return this.state === 'respond' ? RESPOND_COLOR : undefined;
   }
 
   /** Runs the AI for one frame. Returns true if the player just got caught. */
@@ -204,7 +216,8 @@ export class Boss {
     this.returnToRoute();
   }
 
-  syncView(time: number, view?: Phaser.Geom.Rectangle): void {
+  /** `size`: how much bigger to draw the bubble and mark (phones zoomed out, see GameScene.overheadScale). */
+  syncView(time: number, view?: Phaser.Geom.Rectangle, size = 1): void {
     const chasing = this.state === 'chase';
     const responding = this.state === 'respond';
     const shouting = this.shoutLeft > 0 && this.body.speed <= 5;
@@ -215,18 +228,14 @@ export class Boss {
 
     const head = this.y + this.view.headTop - 4;
     const curious = this.state === 'alert' || this.state === 'search';
-    const mark = this.bubble.visible ? null : chasing || responding ? '!' : curious ? '?' : null;
-    this.emote.show(mark, time, responding ? RESPOND_COLOR : undefined);
-    this.emote.place(this.x, head, time);
-    this.bubble.place(this.x, head, view);
+    this.emote.show(this.bubble.visible ? null : this.alarm, time, this.alarmColor);
+    this.emote.place(this.x, head, time, size);
+    this.bubble.place(this.x, head, view, size);
 
-    // Graphics only reads x/y from the points.
-    const poly = conePolygon(this.world.sight, this.visionCone) as Phaser.Math.Vector2[];
-    const color = chasing ? 0xff4d3d : this.suspicion > 0 || curious || responding ? 0xffa53d : 0xfff1a8;
-    const alpha = this.grace > 0 ? 0.07 : chasing ? 0.26 : responding ? 0.22 : 0.16;
+    const look = chasing ? CONE_LOOKS.bossChase : this.suspicion > 0 || curious || responding ? CONE_LOOKS.bossSuspicious : CONE_LOOKS.boss;
     this.cone.clear();
-    this.cone.fillStyle(color, alpha).fillPoints(poly, true);
-    this.cone.lineStyle(3, color, Math.min(0.55, alpha * 2.2)).strokePoints(poly, true);
+    // Just handed out a warning: he isn't looking for Dalton for a moment.
+    drawCone(this.cone, conePolygon(this.world.sight, this.visionCone), this.grace > 0 ? fadedCone(look, 0.35) : look);
   }
 
   private setState(state: BossState) {

@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { UI_ICONS } from '../art/ui';
 import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
 import { controls, oncePerKeyEvent } from '../input/Controls';
+import { drawEdgeMarker } from '../entities/SpeechBubble';
+import { edgeSpot, inSight, spreadOut } from '../systems/edgeMarkers';
 import { isMuted, setMuted, sfx, unlockAudio } from '../systems/sfx';
 import { updateSave } from '../systems/save';
 import { DialogQueue, type DialogView } from '../ui/dialogQueue';
@@ -23,7 +25,7 @@ import {
   setTextSize,
   textStyle,
 } from '../ui/theme';
-import type { DialogLine, GameScene, HudState } from './GameScene';
+import type { DialogLine, GameScene, HudState, Threat } from './GameScene';
 
 const ABILITY_SHORT: Record<string, string> = { student_disguise: 'HIDE', look_busy: 'LOOK\nBUSY' };
 
@@ -43,7 +45,17 @@ interface Toast {
   box: Phaser.GameObjects.Container;
   text: Phaser.GameObjects.Text;
   bg: Phaser.GameObjects.Graphics;
+  /** Fades it out when its time is up. */
+  timer: Phaser.Time.TimerEvent;
 }
+
+/**
+ * At most this many toasts on screen: a new one pushes the oldest out, so they never pile up over
+ * the action. A phone held sideways has room for one (under the HIGH ALERT banner, two would reach
+ * Dalton in the middle of the screen).
+ */
+const MAX_TOASTS = 2;
+const MAX_TOASTS_SIDEWAYS_PHONE = 1;
 
 const inside = (r: Rect, x: number, y: number) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
 
@@ -226,15 +238,17 @@ export class HudScene extends Phaser.Scene {
     this.pauseBox = { x: W - m - 100 * s, y: m, w: 100 * s, h: 104 * s };
     this.warnBox = { x: W - m - 364 * s, y: m, w: 250 * s, h: 104 * s };
     this.alertBox = { x: W / 2 - 240 * s, y: this.clockTop + this.clockBox.h + 12 * s, w: 480 * s, h: 68 * s };
+    // Speech bubbles in the game keep out from under the top row.
+    this.gameScene.hudTop = Math.max(this.statusBox.y + this.statusBox.h, this.clockBox.y + this.clockBox.h, this.warnBox.y + this.warnBox.h);
 
     const st = this.statusBox;
     const tx = st.x + 84 * s;
     this.icons.coin.setPosition(st.x + 46 * s, st.y + 46 * s).setScale((42 * s) / 48);
     setTextSize(this.moneyText, 48 * s).setPosition(tx, st.y + 44 * s);
     this.icons.bag.setPosition(st.x + 46 * s, st.y + 96 * s).setScale((40 * s) / 48);
-    setTextSize(this.bagText, 24 * s).setPosition(tx + 232 * s, st.y + 96 * s);
     this.icons.pin.setPosition(st.x + 46 * s, st.y + 136 * s).setScale((36 * s) / 44);
-    // Cleared so the next frame sets (and fits) it at the new size.
+    // Cleared so the next frame sets (and fits) them at the new size.
+    setTextSize(this.bagText.setText(''), 24 * s).setPosition(tx + 232 * s, st.y + 96 * s);
     setTextSize(this.locationText.setText(''), 28 * s).setPosition(tx, st.y + 135 * s);
 
     const cb = this.clockBox;
@@ -332,6 +346,8 @@ export class HudScene extends Phaser.Scene {
 
     const p = this.panel.clear();
     const g = this.dynamic.clear();
+    // The windows that hide the game this frame: the edge markers point at whoever is under them.
+    const covers: Rect[] = [this.statusBox, this.clockBox, this.warnBox, this.pauseBox];
 
     // Status window: money, bag, location.
     const st = this.statusBox;
@@ -356,7 +372,12 @@ export class HudScene extends Phaser.Scene {
       g.fillStyle(Phaser.Display.Color.ValueToColor(c).lighten(18).color, 1).fillRect(x, by + u, w, u);
       x += w;
     }
-    this.bagText.setText(`${h.bagTotal.toFixed(2)}/${h.bagCapacity.toFixed(2)}`);
+    const bag = `${h.bagTotal.toFixed(2)}/${h.bagCapacity.toFixed(2)}`;
+    if (this.bagText.text !== bag) {
+      // Shrinks to fit the window (the fallback font is wider than the pixel font).
+      setTextSize(this.bagText.setText(bag), 24 * s);
+      fitWidth(this.bagText, st.x + st.w - 16 * s - this.bagText.x);
+    }
     setTextColor(this.bagText, full ? COLORS.boxBad : COLORS.boxText);
 
     // Clock window, with the shift's progress and the coffee (noon) mark.
@@ -394,6 +415,7 @@ export class HudScene extends Phaser.Scene {
     this.alertText.setVisible(!!alert);
     for (const a of this.alertIcons) a.setVisible(!!alert);
     if (alert) {
+      covers.push(ab);
       const flash = Math.floor(time / 380) % 2 === 0;
       drawBox(p, ab.x, ab.y, ab.w, ab.h, { ...ALERT_STYLE, rim: flash ? 0xffe060 : ALERT_STYLE.rim, unit: u });
       this.alertText.setText(`HIGH ALERT  ${Math.ceil(alert.left)}s`);
@@ -410,6 +432,7 @@ export class HudScene extends Phaser.Scene {
     const view = this.dialog.update(this.dialogClock);
     this.gameScene.dialogOpen = this.dialog.open;
     this.drawDialog(view, time);
+    if (view) covers.push(this.dialogBox);
     let promptY = this.promptY;
     if (view && this.touch) promptY = Math.min(promptY, this.dialogBox.y - 44 * s);
 
@@ -421,7 +444,9 @@ export class HudScene extends Phaser.Scene {
       // Keep clear of the ability box in the bottom-left corner (desktop).
       const promptX = !this.touch && h.ability ? Math.max(this.promptX, this.abilityRight + 16 * s + tw / 2) : this.promptX;
       this.promptText.setPosition(promptX, promptY);
-      drawBox(p, promptX - tw / 2, promptY - 34 * s, tw, 68 * s, { unit: u, rim: h.promptBad ? 0xf0a090 : COLORS.boxRim });
+      const box = { x: promptX - tw / 2, y: promptY - 34 * s, w: tw, h: 68 * s };
+      drawBox(p, box.x, box.y, box.w, box.h, { unit: u, rim: h.promptBad ? 0xf0a090 : COLORS.boxRim });
+      covers.push(box);
     } else {
       this.promptText.setVisible(false);
     }
@@ -438,6 +463,7 @@ export class HudScene extends Phaser.Scene {
         const tw = this.abilityText.width + 92 * s;
         this.abilityRight = ax + tw;
         drawBox(p, ax, ay - 38 * s, tw, 76 * s, { unit: u, fill: active ? 0xece0ff : COLORS.box, rim: active || ready ? 0xb898f0 : COLORS.boxRim });
+        covers.push({ x: ax, y: ay - 38 * s, w: tw, h: 76 * s });
         this.icons.star.setPosition(ax + 36 * s, ay - 2 * s).setAlpha(ready || active ? 1 : 0.45);
         if (!ready && !active) {
           g.fillStyle(0x7e57c2, 1).fillRect(ax + 18 * s, ay + 22 * s, (tw - 36 * s) * (1 - h.ability.cooldownLeft / h.ability.cooldown), 5 * s);
@@ -456,10 +482,17 @@ export class HudScene extends Phaser.Scene {
           g.strokePath();
         }
         this.abilityBtnText.setText(ABILITY_SHORT[h.ability.key] ?? 'ABILITY').setAlpha(ready || active ? 1 : 0.5);
+        covers.push({ x: z.x - r, y: z.y - r, w: 2 * r, h: 2 * r });
       }
     }
 
-    if (this.touch) this.drawTouch(g, h, time);
+    if (this.touch) {
+      this.drawTouch(g, h, time);
+      const z = this.actionZone;
+      const r = 112 * s;
+      covers.push({ x: z.x - r, y: z.y - r, w: 2 * r, h: 2 * r });
+    }
+    this.drawEdgeMarkers(g, h, covers);
 
     // Toasts slide into place under the clock (and the alert banner).
     let ty = this.clockTop + this.clockBox.h + 14 * s + (alert ? this.alertBox.h + 12 * s : 0);
@@ -479,6 +512,44 @@ export class HudScene extends Phaser.Scene {
         v.strokeRect(13 + i * 24, 13 + i * 24, W - 26 - i * 48, H - 26 - i * 48);
       }
     }
+  }
+
+  /**
+   * Markers at the screen's edge pointing at anyone onto Dalton who can't be seen (off screen, or
+   * under one of the HUD's windows): the '!' or '?' over their head, with an arrow their way.
+   * Phones see fewer tiles around Dalton, so this is how he knows who's yelling from out of view.
+   */
+  private drawEdgeMarkers(g: Phaser.GameObjects.Graphics, h: HudState, covers: Rect[]) {
+    if (!h.threats.length) return;
+    // About the size of the marks over people's heads.
+    const u = Math.max(3, Math.round(4.5 * this.ui));
+    // A marker's box is 11 x 12 art pixels (the glyph and its frame), plus a 3 pixel arrow.
+    const hw = 5.5 * u + 3 * u;
+    const hh = 6 * u + 3 * u;
+    const m = 8 * this.ui;
+    const area = { x: m + hw, y: m + hh, w: this.W - 2 * (m + hw), h: this.H - 2 * (m + hh) };
+    const screen = { x: 0, y: 0, w: this.W, h: this.H };
+    const near = (t: Threat) => Math.hypot(t.x - h.me.x, t.y - h.me.y);
+    const hidden = h.threats
+      .filter((t) => !inSight(t, screen, covers))
+      // The most urgent first ('!', then the nearest): in a crowd, theirs is the marker that shows.
+      .sort((a, b) => Number(b.mark === '!') - Number(a.mark === '!') || near(a) - near(b));
+    const spots = hidden.map((t) => ({ ...this.clearOf(edgeSpot(h.me, t, area), covers, hw, hh), threat: t }));
+    for (const spot of spreadOut(spots, 2.2 * hh)) drawEdgeMarker(g, spot.threat.mark, spot.x, spot.y, u, spot.side, spot.threat.color);
+  }
+
+  /** Moves a marker (centred on `p`, reaching `hw` / `hh` each way) up or down, out from under the HUD's windows. */
+  private clearOf<P extends { x: number; y: number }>(p: P, covers: Rect[], hw: number, hh: number): P {
+    const out = { ...p };
+    const gap = 6 * this.ui;
+    // Twice: moving out from under one window can land under another.
+    for (let pass = 0; pass < 2; pass++) {
+      for (const c of covers) {
+        if (out.x + hw < c.x || out.x - hw > c.x + c.w || out.y + hh < c.y || out.y - hh > c.y + c.h) continue;
+        out.y = out.y < this.H / 2 ? c.y + c.h + hh + gap : c.y - hh - gap;
+      }
+    }
+    return out;
   }
 
   private drawTouch(g: Phaser.GameObjects.Graphics, h: HudState, time: number) {
@@ -654,27 +725,28 @@ export class HudScene extends Phaser.Scene {
   // ---- toasts ------------------------------------------------------------
 
   private showToast(text: string, color: string, duration: number) {
+    // Make room: the oldest goes (quickly) so the new one is never further down the screen.
+    const max = this.touch && !isPortrait(this.scale) ? MAX_TOASTS_SIDEWAYS_PHONE : MAX_TOASTS;
+    while (this.toasts.length >= max) this.dropToast(this.toasts[0], 120);
     const t = this.add.text(0, 0, text, textStyle(34 * this.ui, color, { align: 'center' })).setOrigin(0.5, 0);
     const bg = this.add.graphics();
     const box = this.add.container(this.W / 2, this.clockTop + this.clockBox.h + 14 * this.ui, [bg, t]).setAlpha(0).setDepth(60);
-    const toast: Toast = { box, text: t, bg };
+    const toast: Toast = { box, text: t, bg, timer: this.time.delayedCall(duration, () => this.dropToast(toast, 260)) };
     this.styleToast(toast);
     // New toasts start where the last one is, then settle into place.
     const last = this.toasts[this.toasts.length - 1];
     if (last) box.y = last.box.y + last.text.height + 34 * this.ui;
     this.toasts.push(toast);
     this.tweens.add({ targets: box, alpha: 1, duration: 160 });
-    this.time.delayedCall(duration, () => {
-      this.tweens.add({
-        targets: box,
-        alpha: 0,
-        duration: 260,
-        onComplete: () => {
-          this.toasts = this.toasts.filter((x) => x !== toast);
-          box.destroy();
-        },
-      });
-    });
+  }
+
+  /** Takes a toast out of the stack (the rest slide up) and fades it away. */
+  private dropToast(toast: Toast, fadeMs: number) {
+    if (!this.toasts.includes(toast)) return;
+    this.toasts = this.toasts.filter((x) => x !== toast);
+    toast.timer.remove();
+    this.tweens.killTweensOf(toast.box);
+    this.tweens.add({ targets: toast.box, alpha: 0, duration: fadeMs, onComplete: () => toast.box.destroy() });
   }
 
   /** Sizes a toast's text and window for the current HUD scale. */

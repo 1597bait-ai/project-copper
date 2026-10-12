@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { BALANCE, TILE } from '../config/balance';
+import { BALANCE, TILE, tilesPerSecond } from '../config/balance';
 import { STUDENT_LINES, type NpcDef } from '../config/npcs';
 import { clearLine, findPath, smoothPath, type Point } from '../systems/pathfinding';
 import { calmDown, followHolds, mindDanger, newMind, think, type MindTuning, type StudentMind, type Yell } from '../systems/studentMind';
@@ -9,7 +9,8 @@ import { DEPTH } from '../ui/depth';
 import type { World } from '../world/World';
 import { CharacterView } from './CharacterView';
 import type { Player } from './Player';
-import { Emote, SpeechBubble } from './SpeechBubble';
+import { Emote, SpeechBubble, type EmoteKind } from './SpeechBubble';
+import { CONE_LOOKS, drawCone, fadedCone } from './visionCone';
 
 const RADIUS = TILE * 0.28;
 /** The route to where Dalton was last seen is re-planned this often while following (seconds). */
@@ -53,8 +54,9 @@ export class Student {
   readonly body: Phaser.Physics.Arcade.Body;
   readonly view: CharacterView;
   readonly mind: StudentMind = newMind();
-  private readonly emote: Emote;
-  private readonly bubble: SpeechBubble;
+  /** The '!' / '?' over their head, and what they say (GameScene keeps them out of each other's way). */
+  readonly emote: Emote;
+  readonly bubble: SpeechBubble;
   private readonly cone: Phaser.GameObjects.Graphics;
 
   facing = Math.random() * Math.PI * 2;
@@ -100,7 +102,7 @@ export class Student {
     this.emote = new Emote(scene);
     this.bubble = new SpeechBubble(scene, BUBBLE_WRAP);
 
-    this.walkSpeed = BALANCE.tilesPerSecond(def.speed) * TILE * BALANCE.students.walkFactor;
+    this.walkSpeed = tilesPerSecond(def.speed) * TILE * BALANCE.students.walkFactor;
 
     const hangouts = BALANCE.students.hangouts;
     const likes = (tx: number, ty: number) => {
@@ -136,6 +138,13 @@ export class Student {
 
   set ignore(seconds: number) {
     this.mind.ignore = seconds;
+  }
+
+  /** Their mark while they're onto Dalton: '!' after him (in sight), '?' unsure or lost him. */
+  get alarm(): EmoteKind | null {
+    const a = this.mind.attention;
+    const lost = a === 'follow' && this.mind.lostFor > 0;
+    return a === 'yell' || (a === 'follow' && !lost) ? '!' : a === 'notice' || lost ? '?' : null;
   }
 
   /** How much they light up the HUD's danger edge (0-1). */
@@ -203,13 +212,17 @@ export class Student {
     return null;
   }
 
-  /** Mr. Gravy caught Dalton: whoever was after him has nothing left to yell about. */
+  /**
+   * Mr. Gravy caught Dalton: whoever was after him has nothing left to yell about, and nobody
+   * starts on him again straight away (or a calm student could send Mr. Gravy right back).
+   */
   calmDown(): void {
-    const wasAfterHim = this.mind.attention === 'yell' || this.mind.attention === 'follow';
-    if (this.mind.attention === 'calm') return;
+    const was = this.mind.attention;
     calmDown(this.mind, BALANCE.students.ignoreSeconds);
+    // Hanging out: keep strolling, just leave him alone for a while.
+    if (was === 'calm') return;
     this.rest();
-    if (wasAfterHim) this.bubble.say(pick(STUDENT_LINES.busted), 1.6);
+    if (was === 'yell' || was === 'follow') this.bubble.say(pick(STUDENT_LINES.busted), 1.6);
   }
 
   /** Word got around: say something about it in `delay` seconds (if they're just hanging out then). */
@@ -239,33 +252,28 @@ export class Student {
     return this.bubble.visible;
   }
 
-  syncView(time: number, view: Phaser.Geom.Rectangle): void {
+  /** `size`: how much bigger to draw the bubble and mark (phones zoomed out, see GameScene.overheadScale). */
+  syncView(time: number, view: Phaser.Geom.Rectangle, size = 1): void {
     const attention = this.mind.attention;
     this.view.update(this.x, this.y, this.facing, this.body.speed > 5, time, {
       pose: attention === 'yell' ? 'yell' : undefined,
     });
 
     const head = this.y + this.view.headTop;
-    // The bubble says it all; otherwise '!' while after him (following, he's in sight), '?' while unsure.
-    const lost = attention === 'follow' && this.mind.lostFor > 0;
-    const mark = this.bubble.visible ? null : attention === 'yell' || (attention === 'follow' && !lost) ? '!' : attention === 'notice' || lost ? '?' : null;
-    this.emote.show(mark, time);
-    this.emote.place(this.x, head - 4, time);
-    this.bubble.place(this.x, head - 4, view);
+    // The bubble says it all; otherwise their mark.
+    this.emote.show(this.bubble.visible ? null : this.alarm, time);
+    this.emote.place(this.x, head - 4, time, size);
+    this.bubble.place(this.x, head - 4, view, size);
 
     this.cone.clear();
     // Cones are only worth drawing when they can be on screen.
     const cone = this.visionCone;
     const r = cone.range;
     if (this.x + r < view.x || this.x - r > view.right || this.y + r < view.y || this.y - r > view.bottom) return;
-    // Graphics only reads x/y from the points.
-    const poly = conePolygon(this.world.sight, cone, 20) as Phaser.Math.Vector2[];
     const after = attention === 'yell' || attention === 'follow';
-    const color = after ? 0xff6a5a : attention === 'notice' ? 0xffa53d : this.highAlert ? 0xffd06a : 0x9fd8ff;
-    // Soft, so the floor art shows through; brighter once they're onto him.
-    const alpha = this.mind.ignore > 0 && !after ? 0.04 : after || attention === 'notice' ? 0.16 : 0.1;
-    this.cone.fillStyle(color, alpha).fillPoints(poly, true);
-    this.cone.lineStyle(2, color, Math.min(0.5, alpha * 2.2)).strokePoints(poly, true);
+    const look = after ? CONE_LOOKS.studentAfter : attention === 'notice' ? CONE_LOOKS.studentNotice : this.highAlert ? CONE_LOOKS.studentAlert : CONE_LOOKS.student;
+    // Faint while they leave Dalton alone.
+    drawCone(this.cone, conePolygon(this.world.sight, cone, 20), this.mind.ignore > 0 && !after ? fadedCone(look, 0.3) : look);
   }
 
   destroy(): void {
