@@ -1,12 +1,15 @@
 import Phaser from 'phaser';
 import { ABILITIES, CHARACTERS, CHARACTER_ORDER } from '../config/characters';
 import { oncePerKeyEvent } from '../input/Controls';
+import { knownSaveEnv, saveEnv } from '../studio/access';
+import { OPEN_STUDIO } from '../studio/hooks';
 import { sfx, unlockAudio } from '../systems/sfx';
 import { loadSave, updateSave } from '../systems/save';
+import { currentBalanceLabel } from '../ui/balanceLabel';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, drawCursor, fitColumn, fitWidth, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { addTileLayers } from '../world/World';
 import { parseMap } from '../world/mapText';
-import { DEFAULT_MAP } from '../world/maps';
+import { currentMapText } from '../world/maps';
 
 interface Card {
   id: string;
@@ -30,7 +33,7 @@ const BACKDROP_DIM = { color: 0x141a30, alpha: 0.62 };
 export function addSchoolBackdrop(scene: Phaser.Scene, W: number, H: number): void {
   scene.add.rectangle(0, 0, W, H, 0x1c2238).setOrigin(0).setDepth(-12);
   try {
-    const map = parseMap(DEFAULT_MAP.text);
+    const map = parseMap(currentMapText());
     const { floor, walls } = addTileLayers(scene, map);
     const mapW = floor.width;
     const mapH = floor.height;
@@ -47,11 +50,22 @@ export function addSchoolBackdrop(scene: Phaser.Scene, W: number, H: number): vo
   scene.add.rectangle(0, 0, W, H, BACKDROP_DIM.color, BACKDROP_DIM.alpha).setOrigin(0).setDepth(-9);
 }
 
+/**
+ * "Balance v3 · 12 Oct 2026" in the top-left corner (menu and end screen), so testers can say which
+ * balance they played. Nothing for the shipped values.
+ */
+export function addBalanceLabel(scene: Phaser.Scene, portrait: boolean): void {
+  const label = currentBalanceLabel();
+  if (label) scene.add.text(24, 18, label, textStyle(portrait ? 30 : 24, COLORS.muted)).setOrigin(0, 0).setDepth(12);
+}
+
 /** Title screen + crew select. Cards sit in a row in landscape and stack in portrait. */
 export class MenuScene extends Phaser.Scene {
   private selected = 'dalton';
   private starting = false;
   private cards: Card[] = [];
+  /** Counts builds of the screen, so a late answer about the Studio only rebuilds the screen it was asked for. */
+  private layoutRun = 0;
 
   /** A problem to show on the menu (e.g. the map file can't be played). */
   private notice: string | null = null;
@@ -78,6 +92,7 @@ export class MenuScene extends Phaser.Scene {
     const top = portrait ? Math.max(0, (H - columnH) / 2) : 0;
 
     addSchoolBackdrop(this, W, H);
+    addBalanceLabel(this, portrait);
     if (this.notice) {
       const t = this.add
         .text(W / 2, top + 22, this.notice, textStyle(26, COLORS.boxBad, { align: 'center', wordWrap: { width: Math.min(W - 120, 1560) } }))
@@ -119,19 +134,34 @@ export class MenuScene extends Phaser.Scene {
     }
     this.refreshCards();
 
-    // START SHIFT with the (secondary) MAP EDITOR beside it in landscape, under it in portrait.
-    const editor = { ...BUTTON_SECONDARY, fontSize: portrait ? 44 : 38 };
+    // START SHIFT, with Copper Studio's (secondary) button beside it in landscape and under it in
+    // portrait, for whoever can save the game's balance (its owner, or the dev server).
+    const run = ++this.layoutRun;
+    const env = knownSaveEnv();
+    const studio = env?.canSave === true;
+    const secondary = { ...BUTTON_SECONDARY, fontSize: portrait ? 44 : 38 };
+    const start = { ...BUTTON_PRIMARY, height: 112, fontSize: 52 };
     if (portrait) {
-      new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { ...BUTTON_PRIMARY, width: 700, height: 112, fontSize: 52 }).setSelected(true);
-      buttonY += 132;
-      new Button(this, cx, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: 520, height: 96 });
-    } else {
+      new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { ...start, width: 700 }).setSelected(true);
+      if (studio) {
+        buttonY += 132;
+        new Button(this, cx, buttonY, 'STUDIO', () => this.openStudio(), { ...secondary, width: 520, height: 96 });
+      }
+    } else if (studio) {
       const gap = 40;
       const startW = 520;
-      const editorW = 360;
-      const left = cx - (startW + gap + editorW) / 2;
-      new Button(this, left + startW / 2, buttonY, 'START SHIFT', () => this.play(), { ...BUTTON_PRIMARY, width: startW, height: 112, fontSize: 52 }).setSelected(true);
-      new Button(this, left + startW + gap + editorW / 2, buttonY, 'MAP EDITOR', () => this.openEditor(), { ...editor, width: editorW, height: 96 });
+      const studioW = 360;
+      const left = cx - (startW + gap + studioW) / 2;
+      new Button(this, left + startW / 2, buttonY, 'START SHIFT', () => this.play(), { ...start, width: startW }).setSelected(true);
+      new Button(this, left + startW + gap + studioW / 2, buttonY, 'STUDIO', () => this.openStudio(), { ...secondary, width: studioW, height: 96 });
+    } else {
+      new Button(this, cx, buttonY, 'START SHIFT', () => this.play(), { ...start, width: 520 }).setSelected(true);
+    }
+    // Still finding out whether saving works here: add the button when the answer comes.
+    if (!env) {
+      void saveEnv().then((e) => {
+        if (e.canSave && run === this.layoutRun && this.scene.isActive() && !this.starting) this.scene.restart({ notice: this.notice ?? undefined });
+      });
     }
 
     // The van and Mr. Gravy keep an eye on things from the corners.
@@ -266,15 +296,14 @@ export class MenuScene extends Phaser.Scene {
     }
   }
 
-  private openEditor() {
+  private openStudio() {
     if (this.starting) return;
     this.starting = true;
     unlockAudio();
     sfx.click();
-    // The editor's PLAY (and the menu rebuilt by BACK) use the saved crew member.
-    updateSave((d) => (d.character = this.selected));
     this.cameras.main.fadeOut(200, 20, 22, 28);
-    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.scene.start('Editor'));
+    // Copper Studio (src/studio/) takes over the page and stops this scene.
+    this.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => this.game.events.emit(OPEN_STUDIO));
   }
 
   private play() {

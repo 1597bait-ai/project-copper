@@ -6,31 +6,34 @@ import { doorKey } from '../entities/Door';
 import { fixtureLook } from '../entities/Fixture';
 import { loadSave } from '../systems/save';
 import { sfx, unlockAudio } from '../systems/sfx';
+import { isTypingTarget } from '../studio/dom';
 import { COLORS, cssPerGamePixel, isPortrait, isTouchDevice, textStyle } from '../ui/theme';
-import {
-  ERASER,
-  EditHistory,
-  ROUTE_STOP,
-  VAN,
-  describeCell,
-  isBlockTool,
-  isDragTool,
-  lineCells,
-  loadEditorMap,
-  paint,
-  reconcileNames,
-  saveEditorMap,
-  vanRect,
-} from '../world/editing';
+import { ERASER, EditHistory, ROUTE_STOP, VAN, describeCell, isBlockTool, isDragTool, lineCells, paint, reconcileNames, vanRect } from '../world/editing';
 import { TILESET_MARGIN, TILESET_SPACING, TILESET_TEXTURE, TILE_FRAMES, frameName, iconFrame, tileLayers } from '../world/autotile';
 import { DECOR_CHARS, FIXTURE_CHARS, OBJECT_BY_CHAR, TILES } from '../world/legend';
 import { parseMap, serializeMap, type ParsedMap, type TilePoint } from '../world/mapText';
-import { DEFAULT_MAP } from '../world/maps';
+import { DEFAULT_MAP, currentMapText } from '../world/maps';
 import { validateMap, type MapReport } from '../world/validate';
 import { decorKey, fixtureMount, standOnFloor, vanKey } from '../world/World';
 
 type Camera = Phaser.Cameras.Scene2D.Camera;
 type Pointer = Phaser.Input.Pointer;
+
+/**
+ * How Copper Studio (src/studio/) runs the editor: the map comes from the Studio's draft, and
+ * every edit goes back into it (the Studio keeps it between visits and saves it to the game).
+ */
+export interface EditorLink {
+  /** The map to open. */
+  map: string;
+  /** The map after edits (undo, redo and RESET too), once a stroke settles: not on every painted tile. */
+  onChange(text: string): void;
+  /** PLAY, once the map has no problems: the Studio's play test. */
+  onPlay(): void;
+}
+
+/** A second-or-so pause in painting before the Studio hears about it. */
+const NOTIFY_MS = 250;
 
 /** Palette entries that aren't paint tools. */
 const PAN = 'pan';
@@ -231,17 +234,15 @@ class UiButton {
 }
 
 /**
- * In-game map editor: paint floors and walls, place things, see problems live, play the map
- * right away and copy its text out. Three cameras: the zoomable map, the scrolling palette and
- * the fixed UI on top. All pointer hit-testing is done here by screen rectangles, so a tap on
- * the UI never paints the map.
+ * The map editor, part of Copper Studio (its Map tab): paint floors and walls, place things, see
+ * problems live, play test the map right away and copy its text out. Three cameras: the zoomable
+ * map, the scrolling palette and the fixed UI on top. All pointer hit-testing is done here by
+ * screen rectangles, so a tap on the UI never paints the map.
  */
 export class EditorScene extends Phaser.Scene {
   // ---- map state
   private rows: string[] = [];
   private names: ParsedMap['names'] = [];
-  /** The built-in map this working copy started from (saved with it). */
-  private base = '';
   private parsed!: ParsedMap;
   private report: MapReport = { errors: [], warnings: [] };
   private history = new EditHistory<Snapshot>(100);
@@ -256,15 +257,13 @@ export class EditorScene extends Phaser.Scene {
   /** Game pixels per CSS pixel, so UI sizes are physical sizes. */
   private u = 1;
   private dirty = false;
-  /** Edited since the last save: only real edits are written, so an untouched copy never goes stale. */
-  private unsaved = false;
+  /** Edited since the Studio last heard about it. */
+  private unsent = false;
   private fitted = true;
   private problemsOpen = false;
   private resetArmed = false;
   private resetArmedAt = 0;
-  private saveFailed = false;
   private validateTimer: Phaser.Time.TimerEvent | null = null;
-  private saveTimer: Phaser.Time.TimerEvent | null = null;
   private resetTimer: Phaser.Time.TimerEvent | null = null;
   private toastTimer: Phaser.Time.TimerEvent | null = null;
   private cursorStyle = '';
@@ -296,7 +295,6 @@ export class EditorScene extends Phaser.Scene {
   private resetBtn!: UiButton;
   private playBtn!: UiButton;
   private infoText!: Phaser.GameObjects.Text;
-  private saveText!: Phaser.GameObjects.Text;
   private toastText: Phaser.GameObjects.Text | null = null;
   /** The toast explains why PLAY refused, so it goes away once the map is playable. */
   private toastIsProblem = false;
@@ -337,15 +335,22 @@ export class EditorScene extends Phaser.Scene {
   private held = new Set<string>();
   private overlay: HTMLDivElement | null = null;
 
-  /** A map handed over by the scene that opened the editor (e.g. "EDIT MAP" after playing it). */
-  private incoming: string | null = null;
+  /** Where the map comes from and goes to (the Studio's draft). */
+  private link!: EditorLink;
+  /** The last edit isn't sent until painting pauses, so a stroke isn't sent tile by tile. */
+  private notifyAt = 0;
 
   constructor() {
     super('Editor');
   }
 
-  init(data?: { mapText?: string }): void {
-    this.incoming = data?.mapText ?? null;
+  init(data?: { link?: EditorLink }): void {
+    // Started without the Studio (debugging): edit the current map and play it directly.
+    this.link = data?.link ?? {
+      map: currentMapText(),
+      onChange: () => {},
+      onPlay: () => this.scene.start('Game', { character: loadSave().character, mapText: this.mapText() }),
+    };
   }
 
   create(): void {
@@ -356,13 +361,13 @@ export class EditorScene extends Phaser.Scene {
     this.history = new EditHistory<Snapshot>(100);
     this.report = { errors: [], warnings: [] };
     this.dirty = false;
-    this.unsaved = false;
+    this.unsent = false;
+    this.notifyAt = 0;
     this.fitted = true;
     this.problemsOpen = false;
     this.resetArmed = false;
     this.resetArmedAt = 0;
-    this.saveFailed = false;
-    this.validateTimer = this.saveTimer = this.resetTimer = this.toastTimer = null;
+    this.validateTimer = this.resetTimer = this.toastTimer = null;
     this.cursorStyle = '';
     this.tilemap = null;
     this.objectsKey = '';
@@ -383,14 +388,8 @@ export class EditorScene extends Phaser.Scene {
     this.held.clear();
     this.overlay = null;
 
-    // A map handed over wins over the saved copy: it's what was just played, even if saving is blocked.
-    const start = this.incoming ? { text: this.incoming, base: DEFAULT_MAP.text, builtInChanged: false } : loadEditorMap(DEFAULT_MAP.text);
-    let map = parseMap(start.text);
-    this.base = start.base;
-    if (map.width < 1 || map.height < 1) {
-      map = parseMap(DEFAULT_MAP.text);
-      this.base = DEFAULT_MAP.text;
-    }
+    let map = parseMap(this.link.map);
+    if (map.width < 1 || map.height < 1) map = parseMap(DEFAULT_MAP.text);
     this.rows = map.rows;
     // Room names that don't point at a room can't be fixed in the editor, so they go.
     const names = reconcileNames(map.rows, map.rows, map.names);
@@ -409,11 +408,7 @@ export class EditorScene extends Phaser.Scene {
     this.report = validateMap(this.parsed);
     this.layout();
     this.fitView();
-    if (start.builtInChanged) {
-      this.toast('The built-in school was updated since you started this map. RESET loads the new one (UNDO brings yours back).', COLORS.warn, 7000);
-      // Said once: the next save records the new built-in map as this copy's base.
-      this.base = DEFAULT_MAP.text;
-    } else if (names.dropped.length) this.toastDropped(names.dropped, false);
+    if (names.dropped.length) this.toastDropped(names.dropped, false);
 
     this.input.on(Phaser.Input.Events.POINTER_DOWN, this.onDown, this);
     this.input.on(Phaser.Input.Events.POINTER_MOVE, this.onMove, this);
@@ -425,9 +420,10 @@ export class EditorScene extends Phaser.Scene {
     window.addEventListener('keydown', this.onKeyDown);
     window.addEventListener('keyup', this.onKeyUp);
     window.addEventListener('blur', this.onBlur);
-    window.addEventListener('pagehide', this.flushSave);
-    document.addEventListener('visibilitychange', this.flushSave);
     this.game.canvas.addEventListener('contextmenu', this.onContextMenu);
+    // The Studio puts the editor to sleep on its other tabs and during play tests.
+    this.events.on(Phaser.Scenes.Events.SLEEP, this.onSleep, this);
+    this.events.on(Phaser.Scenes.Events.WAKE, this.onWake, this);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.shutdown, this);
     this.cameras.main.fadeIn(250, 20, 22, 28);
   }
@@ -439,7 +435,7 @@ export class EditorScene extends Phaser.Scene {
     this.buttons = [];
     this.palItems = [];
     this.nameTags = [];
-    if (this.unsaved) this.saveNow();
+    this.flush();
     this.closeOverlay();
     this.input.off(Phaser.Input.Events.POINTER_DOWN, this.onDown, this);
     this.input.off(Phaser.Input.Events.POINTER_MOVE, this.onMove, this);
@@ -451,16 +447,35 @@ export class EditorScene extends Phaser.Scene {
     window.removeEventListener('keydown', this.onKeyDown);
     window.removeEventListener('keyup', this.onKeyUp);
     window.removeEventListener('blur', this.onBlur);
-    window.removeEventListener('pagehide', this.flushSave);
-    document.removeEventListener('visibilitychange', this.flushSave);
     this.game.canvas.removeEventListener('contextmenu', this.onContextMenu);
+    this.events.off(Phaser.Scenes.Events.SLEEP, this.onSleep, this);
+    this.events.off(Phaser.Scenes.Events.WAKE, this.onWake, this);
     this.input.setDefaultCursor('');
     this.tilemap?.destroy();
     this.tilemap = null;
   }
 
+  private onSleep() {
+    this.finishStroke();
+    this.dropMouseGesture();
+    this.flush();
+    this.held.clear();
+    this.touches.clear();
+    this.pinch = null;
+    this.closeOverlay();
+  }
+
+  private onWake() {
+    // The canvas may have changed size or place while asleep.
+    this.onResize();
+  }
+
   update(_time: number, deltaMs: number): void {
     const dt = Math.min(deltaMs / 1000, 0.1);
+    // Keys held while the keyboard went to the Studio around the map never report letting go.
+    const focus = document.activeElement;
+    if (this.held.size && focus && focus !== document.body && focus !== this.game.canvas) this.held.clear();
+    if (this.unsent && !this.stroke && this.time.now >= this.notifyAt) this.flush();
     const k = this.held;
     const dx = (k.has('KeyD') || k.has('ArrowRight') ? 1 : 0) - (k.has('KeyA') || k.has('ArrowLeft') ? 1 : 0);
     const dy = (k.has('KeyS') || k.has('ArrowDown') ? 1 : 0) - (k.has('KeyW') || k.has('ArrowUp') ? 1 : 0);
@@ -497,14 +512,34 @@ export class EditorScene extends Phaser.Scene {
     return serializeMap(this.rows, this.names);
   }
 
-  /** The map changed: redraw next frame, re-check problems and autosave soon. */
+  /** The map changed: redraw next frame, re-check problems, and tell the Studio once painting pauses. */
   private changed() {
     this.dirty = true;
-    this.unsaved = true;
+    this.unsent = true;
+    this.notifyAt = this.time.now + NOTIFY_MS;
     this.scheduleValidation();
-    this.saveTimer?.remove(false);
-    this.saveTimer = this.time.delayedCall(700, () => this.saveNow());
-    if (this.uiRoot) this.saveText.setText('Saving…').setColor(COLORS.muted);
+  }
+
+  /** Sends the map to the Studio now if it has unsent edits (before a play test, a save, leaving the tab). */
+  flush(): void {
+    if (!this.unsent) return;
+    this.unsent = false;
+    this.link.onChange(this.mapText());
+  }
+
+  /** Replaces the map (the Studio's draft changed: a version loaded, an import...). UNDO brings the old one back. */
+  loadMap(text: string, message?: string): void {
+    this.finishStroke();
+    this.disarmReset();
+    const map = parseMap(text);
+    if (map.width < 1 || map.height < 1) return;
+    if (serializeMap(map.rows, map.names) === this.mapText()) return;
+    const sizeChanged = map.width !== this.parsed.width || map.height !== this.parsed.height;
+    this.commit(map.rows, reconcileNames(map.rows, map.rows, map.names).names);
+    // The Studio already has this map.
+    this.unsent = false;
+    if (sizeChanged) this.fitView();
+    if (message) this.toast(message, COLORS.text, 4000);
   }
 
   /** Problems are re-checked once a stroke is over: mid-stroke the room names aren't settled yet. */
@@ -546,21 +581,6 @@ export class EditorScene extends Phaser.Scene {
     this.names = s.names;
     this.changed();
     this.refresh();
-  }
-
-  /** Closing or hiding the tab can't wait for the autosave timer. */
-  private flushSave = (e: Event) => {
-    if (this.unsaved && (e.type === 'pagehide' || document.visibilityState === 'hidden')) this.saveNow();
-  };
-
-  private saveNow() {
-    this.saveTimer?.remove(false);
-    this.saveTimer = null;
-    const ok = saveEditorMap(this.mapText(), this.base);
-    this.unsaved = !ok;
-    if (!ok && !this.saveFailed && this.alive) this.toast("This browser won't let the editor save. Use COPY MAP to keep your work.", COLORS.warn, 5000);
-    this.saveFailed = !ok;
-    if (this.uiRoot) this.saveText.setText(ok ? 'Saved' : 'Not saved').setColor(ok ? COLORS.good : COLORS.warn);
   }
 
   private runValidation() {
@@ -797,18 +817,18 @@ export class EditorScene extends Phaser.Scene {
       this.buttons.push(b);
       return b;
     };
-    const back = button('BACK', GREY, () => this.back());
     this.undoBtn = button('UNDO', GREY, () => this.undo());
     this.redoBtn = button('REDO', GREY, () => this.redo());
     this.resetBtn = button(this.resetArmed ? 'SURE?' : 'RESET', this.resetArmed ? RED : GREY, () => this.onReset());
     const copy = button('COPY MAP', 0x3a6ea5, () => this.copyMap());
     this.playBtn = button('PLAY', GREEN, () => this.play());
 
-    // Top bar: BACK / UNDO / REDO on the left, RESET / COPY / PLAY on the right (second row if needed).
+    // Top bar: UNDO / REDO on the left, RESET / COPY / PLAY on the right (second row if needed). There
+    // is no BACK: the Studio's tabs and header are right above the editor.
     const pad = (portrait ? 10 : 14) * u;
     const widthOf = (b: UiButton) => Math.max(b.label.width + pad * 2, (touch ? 64 : 56) * u);
     const rowWidth = (bs: UiButton[]) => bs.reduce((s, b) => s + widthOf(b), 0) + gap * (bs.length - 1);
-    const left = [back, this.undoBtn, this.redoBtn];
+    const left = [this.undoBtn, this.redoBtn];
     const right = [this.resetBtn, copy, this.playBtn];
     const lw = rowWidth(left);
     const rw = rowWidth(right);
@@ -832,8 +852,7 @@ export class EditorScene extends Phaser.Scene {
     const infoY = rightY + bh + gap;
     const infoH = (touch ? 26 : 22) * u;
     this.infoText = this.add.text(m, infoY + infoH / 2, '', textStyle(13 * u, COLORS.text)).setOrigin(0, 0.5);
-    this.saveText = this.add.text(W - m, infoY + infoH / 2, this.saveFailed ? 'Not saved' : 'Saved', textStyle(12 * u, this.saveFailed ? COLORS.warn : COLORS.good)).setOrigin(1, 0.5);
-    ui.add([this.infoText, this.saveText]);
+    ui.add(this.infoText);
     const topH = infoY + infoH + gap * 0.5;
     this.topRect.setTo(0, 0, W, topH);
     topBg.fillStyle(PANEL, 0.98).fillRect(0, 0, W, topH);
@@ -1111,7 +1130,7 @@ export class EditorScene extends Phaser.Scene {
     const letter = h && (h.id.length === 1 ? h.id : h.id === ROUTE_STOP ? '1-9' : '');
     const text = h ? `${h.name}${letter ? `  (written as ${letter} in the map text)` : ''}` : at || `${t.id === VAN ? `Van (${this.vanRotated ? '2x4' : '4x2'})` : t.name}: ${how}`;
     this.infoText.setText(text).setScale(1);
-    const room = this.saveText.x - this.saveText.width - 12 * this.u - this.infoText.x;
+    const room = this.scale.width - 2 * this.infoText.x;
     if (this.infoText.width > room) this.infoText.setScale(Math.max(0.5, room / this.infoText.width));
   }
 
@@ -1580,7 +1599,6 @@ export class EditorScene extends Phaser.Scene {
     this.finishStroke();
     const map = parseMap(DEFAULT_MAP.text);
     const sizeChanged = map.width !== this.parsed.width || map.height !== this.parsed.height;
-    this.base = DEFAULT_MAP.text;
     this.commit(map.rows, map.names);
     if (sizeChanged) this.fitView();
     this.toast('Back to the built-in school. UNDO brings your map back.');
@@ -1596,12 +1614,6 @@ export class EditorScene extends Phaser.Scene {
 
   // ---- buttons ---------------------------------------------------------------------
 
-  private back() {
-    this.finishStroke();
-    if (this.unsaved) this.saveNow();
-    this.scene.start('Menu');
-  }
-
   private play() {
     this.finishStroke();
     if (this.validateTimer || this.dirty) this.runValidation();
@@ -1612,8 +1624,8 @@ export class EditorScene extends Phaser.Scene {
       this.renderProblems();
       return;
     }
-    if (this.unsaved) this.saveNow();
-    this.scene.start('Game', { character: loadSave().character, mapText: this.mapText() });
+    this.flush();
+    this.link.onPlay();
   }
 
   /** Must run inside the click's pointer event: browsers only allow clipboard writes there. */
@@ -1715,7 +1727,7 @@ export class EditorScene extends Phaser.Scene {
   // ---- keyboard ----------------------------------------------------------------------
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (this.overlay || !this.alive || !this.scene.isActive()) return;
+    if (this.overlay || !this.alive || !this.scene.isActive() || isTypingTarget(e.target)) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     if (mod && key === 'z') {

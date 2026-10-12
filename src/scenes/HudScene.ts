@@ -4,6 +4,7 @@ import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
 import { controls, oncePerKeyEvent } from '../input/Controls';
 import { drawEdgeMarker } from '../entities/SpeechBubble';
 import { edgeSpot, inSight, spreadOut } from '../systems/edgeMarkers';
+import { HUD_LAYOUT, type HudLayout } from '../studio/hooks';
 import { isMuted, setMuted, sfx, unlockAudio } from '../systems/sfx';
 import { updateSave } from '../systems/save';
 import { DialogQueue, type DialogView } from '../ui/dialogQueue';
@@ -196,6 +197,7 @@ export class HudScene extends Phaser.Scene {
       this.gameScene.events.off('dialogNext', this.nextDialog, this);
       this.gameScene.dialogOpen = false;
       this.gameScene.events.off('paused', this.showPause, this);
+      this.registry.set(HUD_LAYOUT, null);
       this.dialog.clear();
       controls.reset();
     });
@@ -240,6 +242,8 @@ export class HudScene extends Phaser.Scene {
     this.alertBox = { x: W / 2 - 240 * s, y: this.clockTop + this.clockBox.h + 12 * s, w: 480 * s, h: 68 * s };
     // Speech bubbles in the game keep out from under the top row.
     this.gameScene.hudTop = Math.max(this.statusBox.y + this.statusBox.h, this.clockBox.y + this.clockBox.h, this.warnBox.y + this.warnBox.h);
+    // Copper Studio's floating button (during play tests) keeps clear of the windows.
+    this.registry.set(HUD_LAYOUT, { width: W, height: H, boxes: [this.statusBox, this.clockBox, this.warnBox, this.pauseBox, this.alertBox] } satisfies HudLayout);
 
     const st = this.statusBox;
     const tx = st.x + 84 * s;

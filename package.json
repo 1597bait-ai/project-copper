@@ -8,6 +8,7 @@
     "dev": "vite --host",
     "build": "vite build",
     "build:single": "vite build --mode single",
+    "artifact": "npm run build:single && node tools/artifact-page.mjs build",
     "preview": "vite preview --host",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

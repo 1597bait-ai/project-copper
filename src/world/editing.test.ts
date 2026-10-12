@@ -1,7 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  EDITOR_BASE_KEY,
-  EDITOR_MAP_KEY,
   ERASER,
   EditHistory,
   ROUTE_STOP,
@@ -10,12 +8,10 @@ import {
   floorUnder,
   isDragTool,
   lineCells,
-  loadEditorMap,
   nextRouteStop,
   paint,
   reconcileNames,
   sameMap,
-  saveEditorMap,
 } from './editing';
 import { TILE_INDEX } from './legend';
 import { parseMap, serializeMap } from './mapText';
@@ -445,67 +441,13 @@ describe('reconcileNames', () => {
   });
 });
 
-describe('editor storage', () => {
-  const g = globalThis as { localStorage?: Storage };
-  const original = g.localStorage;
-  afterEach(() => {
-    g.localStorage = original;
-  });
+describe('sameMap', () => {
   const OLD = serializeMap(SMALL);
   const NEW = serializeMap(paint(SMALL, 7, 7, 'c').rows);
-  const EDITED = serializeMap(paint(SMALL, 1, 7, '#').rows);
-  const memory = (seed: Record<string, string> = {}) => {
-    const store = new Map(Object.entries(seed));
-    g.localStorage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) } as unknown as Storage;
-    return store;
-  };
-
-  it('falls back to the built-in map when storage is missing or throws', () => {
-    const fresh = { text: 'built-in', base: 'built-in', builtInChanged: false };
-    g.localStorage = undefined;
-    expect(loadEditorMap('built-in')).toEqual(fresh);
-    expect(saveEditorMap('x', 'built-in')).toBe(false);
-    g.localStorage = {
-      getItem: () => {
-        throw new Error('blocked');
-      },
-      setItem: () => {
-        throw new Error('blocked');
-      },
-    } as unknown as Storage;
-    expect(loadEditorMap('built-in')).toEqual(fresh);
-    expect(saveEditorMap('x', 'built-in')).toBe(false);
-  });
-
-  it('saves the map with the built-in map it started from, and loads it back', () => {
-    const store = memory();
-    expect(loadEditorMap(OLD)).toEqual({ text: OLD, base: OLD, builtInChanged: false });
-    expect(saveEditorMap(EDITED, OLD)).toBe(true);
-    expect(store.get(EDITOR_MAP_KEY)).toBe(EDITED);
-    expect(store.get(EDITOR_BASE_KEY)).toBe(OLD);
-    expect(loadEditorMap(OLD)).toEqual({ text: EDITED, base: OLD, builtInChanged: false });
-  });
-
-  it('opens an updated built-in map instead of an unedited copy of the old one', () => {
-    memory({ [EDITOR_MAP_KEY]: OLD, [EDITOR_BASE_KEY]: OLD });
-    expect(loadEditorMap(NEW)).toEqual({ text: NEW, base: NEW, builtInChanged: false });
-    // Comments and formatting don't count as edits.
-    memory({ [EDITOR_MAP_KEY]: OLD, [EDITOR_BASE_KEY]: `// old notes\n${SMALL.join('\r\n')}` });
-    expect(loadEditorMap(NEW).text).toBe(NEW);
-  });
-
-  it('keeps edited work when the built-in map changes, and says so', () => {
-    memory({ [EDITOR_MAP_KEY]: EDITED, [EDITOR_BASE_KEY]: OLD });
-    expect(loadEditorMap(NEW)).toEqual({ text: EDITED, base: OLD, builtInChanged: true });
-  });
-
-  it('keeps a copy saved before bases were recorded', () => {
-    memory({ [EDITOR_MAP_KEY]: EDITED });
-    expect(loadEditorMap(NEW)).toEqual({ text: EDITED, base: NEW, builtInChanged: false });
-  });
 
   it('compares maps by grid and room names only', () => {
     expect(sameMap(OLD, `// a note\n\n${SMALL.join('\n')}\n`)).toBe(true);
+    expect(sameMap(OLD, `// old notes\n${SMALL.join('\r\n')}`)).toBe(true);
     expect(sameMap(OLD, NEW)).toBe(false);
     expect(sameMap(OLD, serializeMap(SMALL, [{ x: 2, y: 2, name: 'Art Room' }]))).toBe(false);
   });

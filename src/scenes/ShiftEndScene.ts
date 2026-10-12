@@ -5,7 +5,7 @@ import { saleValue } from '../systems/Bag';
 import { loadSave, updateSave } from '../systems/save';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, fitColumn, fitWidth, isPortrait, money, textStyle } from '../ui/theme';
 import { GameScene, type ShiftSummary } from './GameScene';
-import { addSchoolBackdrop } from './MenuScene';
+import { addBalanceLabel, addSchoolBackdrop } from './MenuScene';
 
 // Summaries already written to the save (the scene restarts on resize; don't count a shift twice).
 const recorded = new WeakSet<ShiftSummary>();
@@ -43,6 +43,7 @@ export class ShiftEndScene extends Phaser.Scene {
     const cx = W / 2;
     const top = portrait ? Math.max(0, (H - columnH) / 2) : 0;
     addSchoolBackdrop(this, W, H);
+    addBalanceLabel(this, portrait);
 
     const headline = s.fired ? "YOU'RE FIRED!" : 'SHIFT OVER';
     this.add
@@ -102,17 +103,8 @@ export class ShiftEndScene extends Phaser.Scene {
     const again = s.fired ? 'TRY AGAIN' : 'NEXT SHIFT';
     const by = portrait ? winY + winH + 120 : Math.min(H - 100, Math.max(winY + winH, 640) + 130);
     const replay = () => this.scene.start('Game', { character: s.character, mapText: s.mapText });
-    const grey = { ...BUTTON_SECONDARY, width: 420, height: 104, fontSize: 44 };
-    if (s.mapText && !portrait) {
-      // Played a map from the editor: offer the way straight back to it.
-      new Button(this, cx - 460, by, again, replay, { ...BUTTON_PRIMARY, width: 400, height: 104, fontSize: 44 }).setSelected(true);
-      new Button(this, cx, by, 'EDIT MAP', () => this.scene.start('Editor', { mapText: s.mapText }), { ...grey, width: 400 });
-      new Button(this, cx + 460, by, 'MENU', () => this.scene.start('Menu'), { ...grey, width: 400 });
-    } else {
-      new Button(this, cx - 240, by, again, replay, { ...BUTTON_PRIMARY, width: 420, height: 104, fontSize: 44 }).setSelected(true);
-      new Button(this, cx + 240, by, 'MENU', () => this.scene.start('Menu'), grey);
-      if (s.mapText) new Button(this, cx, by + 130, 'EDIT MAP', () => this.scene.start('Editor', { mapText: s.mapText }), { ...grey, width: 900 });
-    }
+    new Button(this, cx - 240, by, again, replay, { ...BUTTON_PRIMARY, width: 420, height: 104, fontSize: 44 }).setSelected(true);
+    new Button(this, cx + 240, by, 'MENU', () => this.scene.start('Menu'), { ...BUTTON_SECONDARY, width: 420, height: 104, fontSize: 44 });
 
     this.input.keyboard!.once('keydown-ENTER', replay);
     this.input.keyboard!.once('keydown-ESC', () => this.scene.start('Menu'));

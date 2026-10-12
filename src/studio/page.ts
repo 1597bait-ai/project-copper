@@ -18,6 +18,12 @@ export const ARTIFACT_TAIL = '</body></html>';
 /** Element ids the page is built from. */
 export const PAGE_IDS = { style: 'copper-style', tuning: 'copper-tuning', script: 'copper-game' } as const;
 
+/**
+ * The capabilities the page is published with (the Artifact tool's `capabilities`): `artifact`
+ * lets the page republish itself when the Studio saves, `downloads` lets it hand over the tuning file.
+ */
+export const PAGE_CAPABILITIES = { artifact: {}, downloads: true } as const;
+
 export interface PageParts {
   title: string;
   /** The page's CSS (without the <style> tag). */
@@ -38,9 +44,29 @@ export function embedJson(json: string): string {
   return json.replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 }
 
+/**
+ * Why `script` can't sit inside a <script> element, or null. "</script" would end the element early;
+ * "<!--" followed by "<script" (with no "-->" between) puts the browser's parser in a state where it
+ * never sees the element's real end tag, swallowing the rest of the page. The minifier escapes the
+ * first two in the game's strings, but "<script" stays (this file's templates have it), so an
+ * unminified build or a stray "<!--" must be caught here rather than break the published page.
+ */
+export function inlineScriptProblem(script: string): string | null {
+  if (/<\/script/i.test(script)) return 'contains "</script"';
+  // The HTML parser's script states: plain, "escaped" after "<!--", "double escaped" after "<!--...<script".
+  let state: 'plain' | 'escaped' | 'double' = 'plain';
+  for (const [token] of script.matchAll(/<!--|-->|<script(?=[\s/>])/gi)) {
+    if (token === '-->') state = 'plain';
+    else if (token === '<!--') state = state === 'plain' ? 'escaped' : state;
+    else if (state === 'escaped') state = 'double';
+  }
+  return state === 'double' ? 'contains "<!--" and then "<script" (with no "-->" between)' : null;
+}
+
 /** The page content, exactly as the Artifact tool publishes it (the host adds the skeleton). */
 export function buildPageContent(parts: PageParts): string {
-  if (/<\/script/i.test(parts.script)) throw new Error('The game script contains "</script" and cannot be inlined');
+  const problem = inlineScriptProblem(parts.script);
+  if (problem) throw new Error(`The game script ${problem}, so it cannot be inlined`);
   if (/<\/style/i.test(parts.style)) throw new Error('The page style contains "</style" and cannot be inlined');
   return [
     `<title>${escapeHtml(parts.title)}</title>`,
@@ -52,9 +78,14 @@ export function buildPageContent(parts: PageParts): string {
   ].join('\n');
 }
 
+/** The document a viewer gets for published page content: the host's skeleton around it. */
+export function wrapInHost(content: string): string {
+  return `${ARTIFACT_HEAD}\n${content}\n${ARTIFACT_TAIL}`;
+}
+
 /** The complete document the page sends when it republishes itself. */
 export function buildArtifactDocument(parts: PageParts): string {
-  return `${ARTIFACT_HEAD}\n${buildPageContent(parts)}\n${ARTIFACT_TAIL}`;
+  return wrapInHost(buildPageContent(parts));
 }
 
 /** Reads the parts back out of a page's HTML (a saved artifact, or the content file). Null if it isn't one. */
@@ -62,8 +93,31 @@ export function parsePage(html: string): PageParts | null {
   const title = /<title>([\s\S]*?)<\/title>/i.exec(html)?.[1];
   const style = new RegExp(`<style id="${PAGE_IDS.style}">([\\s\\S]*?)</style>`).exec(html)?.[1];
   const tuning = new RegExp(`<script type="application/json" id="${PAGE_IDS.tuning}">([\\s\\S]*?)</script>`).exec(html)?.[1];
-  const script = new RegExp(`<script type="module" id="${PAGE_IDS.script}">([\\s\\S]*)</script>`).exec(html)?.[1];
+  // The game script can't contain "</script" (buildPageContent refuses it), so its first one ends it,
+  // even when a host's own scripts follow.
+  const script = new RegExp(`<script type="module" id="${PAGE_IDS.script}">([\\s\\S]*?)</script>`).exec(html)?.[1];
   if (title === undefined || style === undefined || tuning === undefined || script === undefined) return null;
   const unescape = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   return { title: unescape(title), style, tuning, script };
+}
+
+/**
+ * The parts of the page that is running, read from the live DOM, so the game can rebuild its own
+ * page when it republishes itself. Never serialize the DOM instead: it holds the viewer's session
+ * and the host's own scripts. Null when the page isn't in this format (it was published before
+ * Copper Studio could save into it).
+ */
+export function readLivePage(doc: Document): PageParts | null {
+  const style = doc.getElementById(PAGE_IDS.style);
+  const script = doc.getElementById(PAGE_IDS.script);
+  if (style?.tagName.toLowerCase() !== 'style' || script?.tagName.toLowerCase() !== 'script') return null;
+  // The page's own <title> sits beside its style; a host may put another one in <head>.
+  const titles = Array.from(doc.getElementsByTagName('title'));
+  const title = titles.find((t) => t.parentNode === style.parentNode) ?? titles[0];
+  return {
+    title: title?.textContent ?? '',
+    style: style.textContent ?? '',
+    tuning: doc.getElementById(PAGE_IDS.tuning)?.textContent ?? '',
+    script: script.textContent ?? '',
+  };
 }

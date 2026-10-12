@@ -24,13 +24,13 @@ import { chatterDelays, hearsYell, yellRaisesAlarm } from '../systems/studentMin
 import { DEPTH } from '../ui/depth';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { parseMap } from '../world/mapText';
-import { DEFAULT_MAP } from '../world/maps';
+import { DEFAULT_MAP, currentMapText } from '../world/maps';
 import { validateMap } from '../world/validate';
 import { World } from '../world/World';
 
 export interface GameInit {
   character?: string;
-  /** Text of the map to play (from the map editor). Defaults to the built-in school. */
+  /** Text of the map to play. Defaults to the current one (saved in Copper Studio, else the built-in school). */
   mapText?: string;
 }
 
@@ -43,7 +43,7 @@ export interface ShiftSummary {
   character: string;
   /** Paid by the sleepy coworker to keep quiet (already included in `earned`). */
   hushMoney: number;
-  /** Set when the shift was played on a custom map, so "next shift" stays on it. */
+  /** Set when the shift was played on a map handed to it, so "next shift" stays on it. */
   mapText?: string;
 }
 
@@ -107,7 +107,7 @@ export class GameScene extends Phaser.Scene {
   hud!: HudState;
 
   private characterId = 'dalton';
-  /** Custom map text, or undefined for the built-in map. */
+  /** The map handed to this shift, or undefined for the current one (see currentMapText). */
   mapText: string | undefined;
   /** Seconds of shift played so far (in-game time: tests wait on this rather than the wall clock). */
   elapsed = 0;
@@ -185,10 +185,11 @@ export class GameScene extends Phaser.Scene {
 
   create(): void {
     const character: CharacterDef = CHARACTERS[this.characterId];
-    let map = parseMap(this.mapText ?? DEFAULT_MAP.text);
+    const text = this.mapText ?? currentMapText();
+    let map = parseMap(text);
     let report = validateMap(map);
-    if (report.errors.length && this.mapText !== undefined) {
-      // Never strand the player on a broken custom map: fall back to the built-in school.
+    if (report.errors.length && text !== DEFAULT_MAP.text) {
+      // Never strand the player on a broken map: fall back to the built-in school.
       const problem = report.errors[0];
       console.warn('Map has problems, playing the built-in map instead:', report.errors);
       this.mapText = undefined;

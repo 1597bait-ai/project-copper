@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { generateArt } from '../art';
+import { ART_READY, STUDIO_OPEN } from '../studio/hooks';
 import { setMuted } from '../systems/sfx';
 import { loadSave } from '../systems/save';
 import { cssPerGamePixel, loadFonts, textStyle } from '../ui/theme';
@@ -11,7 +12,7 @@ function nextFrame(): Promise<void> {
   return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
 }
 
-/** Waits for the fonts, draws all the art (tileset, sprites) into textures, then opens the menu. */
+/** Waits for the fonts, draws all the art (tileset, sprites) into textures, then opens the menu (unless Copper Studio is up). */
 export class BootScene extends Phaser.Scene {
   constructor() {
     super('Boot');
@@ -29,6 +30,10 @@ export class BootScene extends Phaser.Scene {
       label.setText(`Loading… ${Math.round((100 * done) / total)}%`);
       return nextFrame();
     });
-    this.scene.start('Menu');
+    this.registry.set(ART_READY, true);
+    this.game.events.emit(ART_READY);
+    // The Studio opened while the art was drawing (#studio, or back from a save): it starts the menu when it closes.
+    if (this.registry.get(STUDIO_OPEN)) this.scene.stop();
+    else this.scene.start('Menu');
   }
 }

@@ -2,9 +2,9 @@ import lincoln from '../assets/maps/lincoln.txt?raw';
 import { tunedMapText } from '../config/tuning';
 
 // The maps. A map is a plain text file (see src/world/mapText.ts for the format and
-// src/world/legend.ts for the characters). Edit one in any text editor or with the in-game
-// map editor. Every map listed here is checked by `npm test`; the game plays (and the editor
-// opens) the first one.
+// src/world/legend.ts for the characters). Edit one in any text editor or with the map editor in
+// Copper Studio. Every map listed here is checked by `npm test`; the game plays the first one,
+// unless a map saved in the Studio replaces it (currentMapText).
 
 export interface MapEntry {
   key: string;

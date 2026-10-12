@@ -1,4 +1,4 @@
-// The rules behind the in-game map editor (src/scenes/EditorScene.ts). A map is edited as its
+// The rules behind the map editor (src/scenes/EditorScene.ts, Copper Studio's Map tab). A map is edited as its
 // grid rows (see src/world/mapText.ts for the text format); nothing here touches Phaser, so
 // every rule is unit tested in editing.test.ts.
 
@@ -421,56 +421,10 @@ export function describeCell(map: ParsedMap, x: number, y: number): string {
   return [`${x},${y}`, cellName(map.rows[y][x]), room].filter(Boolean).join(' — ');
 }
 
-/** Where the editor keeps the map being worked on. */
-export const EDITOR_MAP_KEY = 'project-copper/editor/map/v1';
-/** The built-in map that working copy started from, so an update to the built-in map can be noticed. */
-export const EDITOR_BASE_KEY = 'project-copper/editor/base/v1';
-
 /** Same grid and room names, whatever the comments and formatting. */
 export function sameMap(a: string, b: string): boolean {
   if (a === b) return true;
   const pa = parseMap(a);
   const pb = parseMap(b);
   return serializeMap(pa.rows, pa.names) === serializeMap(pb.rows, pb.names);
-}
-
-export interface EditorStart {
-  /** The map to edit. */
-  text: string;
-  /** The built-in map it started from (saved alongside it). */
-  base: string;
-  /** The saved copy has edits and the built-in map has changed since the copy was started. */
-  builtInChanged: boolean;
-}
-
-/**
- * The map the editor opens: the saved working copy, or `builtIn` when there is none, storage is
- * unavailable, or the copy is an unedited copy of an older built-in map.
- */
-export function loadEditorMap(builtIn: string): EditorStart {
-  let text: string | null = null;
-  let base: string | null = null;
-  try {
-    text = globalThis.localStorage?.getItem(EDITOR_MAP_KEY) ?? null;
-    base = globalThis.localStorage?.getItem(EDITOR_BASE_KEY) ?? null;
-  } catch {
-    // Storage can be blocked (private mode, sandboxed embeds): just start from the built-in map.
-  }
-  const fresh = { text: builtIn, base: builtIn, builtInChanged: false };
-  if (!text?.trim()) return fresh;
-  // Copies saved before the base was recorded are taken as based on today's map.
-  if (!base || sameMap(base, builtIn)) return { text, base: builtIn, builtInChanged: false };
-  if (sameMap(text, base)) return fresh;
-  return { text, base, builtInChanged: true };
-}
-
-/** Returns false when the map couldn't be saved. */
-export function saveEditorMap(text: string, base: string): boolean {
-  try {
-    globalThis.localStorage.setItem(EDITOR_MAP_KEY, text);
-    globalThis.localStorage.setItem(EDITOR_BASE_KEY, base);
-    return true;
-  } catch {
-    return false;
-  }
 }

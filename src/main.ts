@@ -7,6 +7,8 @@ import { GameScene } from './scenes/GameScene';
 import { HudScene } from './scenes/HudScene';
 import { MenuScene } from './scenes/MenuScene';
 import { ShiftEndScene } from './scenes/ShiftEndScene';
+import { initStudio } from './studio';
+import type { Studio } from './studio/Studio';
 
 // The page carries the tuning saved in Copper Studio (src/studio/): apply it before anything reads the config.
 const embedded = readEmbeddedTuning();
@@ -26,8 +28,12 @@ const game = new Phaser.Game({
   },
   physics: { default: 'arcade', arcade: { debug: false } },
   input: { activePointers: 4, gamepad: true },
+  // The map editor lives in Copper Studio (its Map tab), which starts it.
   scene: [BootScene, MenuScene, GameScene, HudScene, ShiftEndScene, EditorScene],
 });
+
+// Copper Studio, the developer's balancing app: the menu's STUDIO button, #studio, or back from a save.
+const studio = initStudio(game, embedded.file);
 
 // Handy for debugging in the browser console and for the automated smoke test (which reads the
 // tuning numbers from here, so editing src/config/balance.ts never breaks it).
@@ -38,7 +44,8 @@ declare global {
       balance: typeof BALANCE;
       rules: { tilesPerSecond: typeof tilesPerSecond; bagCapacity: typeof bagCapacity };
       tuning: typeof activeTuning;
+      studio: Studio;
     };
   }
 }
-window.__COPPER__ = { game, balance: BALANCE, rules: { tilesPerSecond, bagCapacity }, tuning: activeTuning };
+window.__COPPER__ = { game, balance: BALANCE, rules: { tilesPerSecond, bagCapacity }, tuning: activeTuning, studio };

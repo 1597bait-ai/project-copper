@@ -1,0 +1,189 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULTS, emptyTuning, getPath, makeSave, valuesWith, type TuningFile } from '../config/tuning';
+import { paint } from '../world/editing';
+import { parseMap, serializeMap } from '../world/mapText';
+import { DEFAULT_MAP } from '../world/maps';
+import {
+  DRAFT_KEY,
+  LEGACY_EDITOR_KEYS,
+  SESSION_KEY,
+  SESSION_MAX_AGE_MS,
+  changeLines,
+  changedPaths,
+  countBySection,
+  draftFrom,
+  loadDraft,
+  mapsDiffer,
+  normalizeMap,
+  parseStoredDraft,
+  stashSession,
+  storeDraft,
+  takeLegacyEditorMap,
+  takeSession,
+  withValue,
+} from './draft';
+import type { KeyValue } from './storage';
+
+const BUILT_IN = DEFAULT_MAP.text;
+const built = parseMap(BUILT_IN);
+/** The built-in school with one copper pile painted in the first hallway tile found. */
+const EDITED = (() => {
+  for (let y = 0; y < built.height; y++) {
+    const x = built.rows[y].indexOf('.');
+    if (x >= 0) {
+      const r = paint(built.rows, x, y, 'c');
+      if (r.changed) return serializeMap(r.rows, built.names);
+    }
+  }
+  throw new Error('no hallway tile');
+})();
+
+function memory(seed: Record<string, string> = {}) {
+  const map = new Map(Object.entries(seed));
+  const store: KeyValue = {
+    getItem: (k) => map.get(k) ?? null,
+    setItem: (k, v) => void map.set(k, v),
+    removeItem: (k) => void map.delete(k),
+  };
+  return { store, map };
+}
+const blocked: KeyValue = {
+  getItem: () => {
+    throw new Error('blocked');
+  },
+  setItem: () => {
+    throw new Error('blocked');
+  },
+  removeItem: () => {
+    throw new Error('blocked');
+  },
+};
+
+const saved = (values: TuningFile['values'], map: string | null = null, revision = 3): TuningFile => ({ ...emptyTuning(), revision, values, map, savedAt: '2026-10-12T12:00:00Z' });
+
+describe('the draft', () => {
+  it('starts as the saved version', () => {
+    const d = draftFrom(saved({ npcs: { mr_gravy: { speed: 1.5 } } }, EDITED), BUILT_IN);
+    expect(d).toEqual({ values: { npcs: { mr_gravy: { speed: 1.5 } } }, map: EDITED, note: '', baseRevision: 3 });
+  });
+
+  it('keeps overrides minimal: a value put back to the shipped one stops being one', () => {
+    let d = draftFrom(emptyTuning(), BUILT_IN);
+    d = withValue(d, 'npcs.mr_gravy.speed', 1.5);
+    d = withValue(d, 'balance.boss.chaseAt', 0.5);
+    expect(d.values).toEqual({ npcs: { mr_gravy: { speed: 1.5 } }, balance: { boss: { chaseAt: 0.5 } } });
+    d = withValue(d, 'npcs.mr_gravy.speed', DEFAULTS.npcs.mr_gravy.speed);
+    expect(d.values).toEqual({ balance: { boss: { chaseAt: 0.5 } } });
+  });
+
+  it('goes through the schema: clamped, and refused values leave it alone', () => {
+    const d = draftFrom(emptyTuning(), BUILT_IN);
+    expect(withValue(d, 'npcs.mr_gravy.speed', 99).values).toEqual({ npcs: { mr_gravy: { speed: 8 } } });
+    expect(withValue(d, 'npcs.mr_gravy.speed', 'fast')).toBe(d);
+    expect(withValue(d, 'balance.secretCheat', 1)).toBe(d);
+    expect(withValue(d, 'characters.dalton.name', '   ')).toBe(d);
+    // The same value again is no change at all.
+    expect(withValue(d, 'npcs.mr_gravy.speed', DEFAULTS.npcs.mr_gravy.speed)).toBe(d);
+  });
+
+  it('switches an optional range off and back on', () => {
+    let d = withValue(draftFrom(emptyTuning(), BUILT_IN), 'fixtures.desk.range', null);
+    expect(d.values).toEqual({ fixtures: { desk: { range: null } } });
+    expect(getPath(valuesWith(d.values), 'fixtures.desk.range')).toBeUndefined();
+    d = withValue(d, 'fixtures.desk.range', DEFAULTS.fixtures.desk.range);
+    expect(d.values).toEqual({});
+  });
+
+  it('counts changes against the saved version, not the shipped one', () => {
+    const file = saved({ npcs: { mr_gravy: { speed: 1.5 } } });
+    const savedValues = valuesWith(file.values);
+    let d = draftFrom(file, BUILT_IN);
+    expect(changedPaths(valuesWith(d.values), savedValues)).toEqual([]);
+    d = withValue(d, 'npcs.mr_gravy.speed', 3);
+    d = withValue(d, 'balance.students.hangouts', ['hallway']);
+    expect(changedPaths(valuesWith(d.values), savedValues)).toEqual(['npcs.mr_gravy.speed', 'balance.students.hangouts']);
+    expect(countBySection(['npcs.mr_gravy.speed', 'balance.students.hangouts'])).toMatchObject({ gravy: 1, students: 1, crew: 0, loot: 0 });
+  });
+
+  it('treats a reformatted built-in map as the built-in map', () => {
+    const reformatted = serializeMap(built.rows, built.names);
+    expect(reformatted).not.toBe(BUILT_IN);
+    expect(normalizeMap(reformatted, BUILT_IN)).toBeNull();
+    expect(normalizeMap('  ', BUILT_IN)).toBeNull();
+    expect(normalizeMap(EDITED, BUILT_IN)).toBe(EDITED);
+    expect(mapsDiffer(null, reformatted, BUILT_IN)).toBe(false);
+    expect(mapsDiffer(null, EDITED, BUILT_IN)).toBe(true);
+  });
+
+  it('lists changes the way a save records them, map included', () => {
+    const from = { values: DEFAULTS, map: null };
+    const to = { values: valuesWith({ npcs: { mr_gravy: { speed: 1.5 } } }), map: EDITED };
+    const lines = changeLines(from, to, BUILT_IN);
+    expect(lines).toEqual(['Mr. Gravy › Stats › Speed: 2 → 1.5', 'Map › edited']);
+    expect(changeLines(to, from, BUILT_IN)).toContain('Map › back to the built-in school');
+    // The same lines a save writes into the history.
+    const file = makeSave({ values: to.values, map: to.map, note: '', previous: emptyTuning(), now: 'now', builtInMap: BUILT_IN });
+    expect(file.history[0].changes).toEqual(lines);
+  });
+});
+
+describe('keeping the draft in the browser', () => {
+  it('stores it and loads it back', () => {
+    const { store, map } = memory();
+    const d = { ...withValue(draftFrom(saved({}, null, 2), BUILT_IN), 'npcs.mr_gravy.speed', 1.5), map: EDITED, note: 'slower' };
+    expect(storeDraft(store, d, '2026-10-12T12:00:00Z')).toBe(true);
+    expect(map.has(DRAFT_KEY)).toBe(true);
+    expect(loadDraft(store, BUILT_IN)).toEqual(d);
+  });
+
+  it('works without storage', () => {
+    const d = draftFrom(emptyTuning(), BUILT_IN);
+    expect(storeDraft(null, d, 'now')).toBe(false);
+    expect(storeDraft(blocked, d, 'now')).toBe(false);
+    expect(loadDraft(null, BUILT_IN)).toBeNull();
+    expect(loadDraft(blocked, BUILT_IN)).toBeNull();
+  });
+
+  it('checks a stored draft like a tuning file', () => {
+    const raw = { format: 'copper-studio-draft', values: { npcs: { mr_gravy: { speed: 99, flying: true } } }, map: 42, note: 7, baseRevision: -3 };
+    expect(parseStoredDraft(raw, BUILT_IN)).toEqual({ values: { npcs: { mr_gravy: { speed: 8 } } }, map: null, note: '', baseRevision: 0 });
+    expect(parseStoredDraft({ values: {} }, BUILT_IN)).toBeNull();
+    expect(parseStoredDraft('nope', BUILT_IN)).toBeNull();
+    const { store } = memory({ [DRAFT_KEY]: '{not json' });
+    expect(loadDraft(store, BUILT_IN)).toBeNull();
+  });
+});
+
+describe('reopening after a save', () => {
+  it('reads the stash once', () => {
+    const { store } = memory();
+    const session = { tab: 'gravy', crew: 'tomothy', saving: { revision: 4, target: 'dev' }, at: 1000 };
+    expect(stashSession(store, session)).toBe(true);
+    expect(takeSession(store, 2000)).toEqual({ ...session, conflict: false });
+    expect(takeSession(store, 2000)).toBeNull();
+  });
+
+  it('ignores an old or broken stash', () => {
+    const { store } = memory({ [SESSION_KEY]: JSON.stringify({ tab: 'map', crew: 'dalton', at: 0 }) });
+    expect(takeSession(store, SESSION_MAX_AGE_MS + 1)).toBeNull();
+    expect(takeSession(memory({ [SESSION_KEY]: '[]' }).store, 0)).toBeNull();
+    expect(takeSession(blocked, 0)).toBeNull();
+    expect(takeSession(null, 0)).toBeNull();
+  });
+});
+
+describe("the old map editor's work", () => {
+  it('moves an edited map over, once', () => {
+    const { store, map } = memory({ [LEGACY_EDITOR_KEYS.map]: EDITED, [LEGACY_EDITOR_KEYS.base]: BUILT_IN });
+    expect(takeLegacyEditorMap(store, BUILT_IN)).toBe(EDITED);
+    expect(map.size).toBe(0);
+    expect(takeLegacyEditorMap(store, BUILT_IN)).toBeNull();
+  });
+
+  it('ignores an unedited copy, and blocked storage', () => {
+    const { store, map } = memory({ [LEGACY_EDITOR_KEYS.map]: serializeMap(built.rows, built.names) });
+    expect(takeLegacyEditorMap(store, BUILT_IN)).toBeNull();
+    expect(map.size).toBe(0);
+    expect(takeLegacyEditorMap(blocked, BUILT_IN)).toBeNull();
+  });
+});
