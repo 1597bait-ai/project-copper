@@ -216,7 +216,7 @@ const CSS = `
   .cs { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-areas: "head" "notes" "nav" "main"; font-size: 16px; }
   .cs-head { gap: 8px; padding: 8px 12px; }
   .cs-brand { gap: 6px 8px; }
-  .cs-logo { font-size: 19px; margin-right: 0; }
+  .cs-logo { font-size: 15px; letter-spacing: .04em; margin-right: 0; } /* leaves room for both chips beside it */
   .cs-chip { font-size: 12.5px; padding: 3px 8px; }
   .cs-wide { display: none; }
   .cs-narrow { display: inline; }
