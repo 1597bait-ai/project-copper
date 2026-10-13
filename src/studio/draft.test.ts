@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULTS, emptyTuning, getPath, makeSave, valuesWith, type TuningFile } from '../config/tuning';
+import { DEFAULTS, emptyTuning, getPath, makeSave, parseTuning, stringifyTuning, valuesWith, type TuningFile } from '../config/tuning';
 import { paint } from '../world/editing';
 import { parseMap, serializeMap } from '../world/mapText';
 import { DEFAULT_MAP } from '../world/maps';
@@ -15,11 +15,15 @@ import {
   clearSession,
   countBySection,
   draftFrom,
+  exportedDraft,
   loadDraft,
   mapsDiffer,
+  mergeDrafts,
   normalizeMap,
   parseStoredDraft,
   rebaseDraft,
+  sameDraft,
+  saveLanded,
   stashSession,
   storeDraft,
   takeLegacyEditorMap,
@@ -149,9 +153,15 @@ describe('a newer version saved since the draft started', () => {
 
   it("finds each version's values", () => {
     expect(versionOf(v2, 2)).toEqual({ values: v2.values, map: null });
-    expect(versionOf(v2, 1)).toEqual({ values: { npcs: { mr_gravy: { speed: 1.5 } } }, map: null });
+    expect(versionOf(v2, 1)).toEqual({ values: { npcs: { mr_gravy: { speed: 1.5 } } }, map: BUILT_IN });
     expect(versionOf(v2, 0)).toEqual({ values: {}, map: null });
     expect(versionOf(v2, 7)).toBeNull();
+  });
+
+  it('brings a version saved on the built-in school back on that school, after the built-in one changed', () => {
+    // A dev server save (or a pull) wrote another map into the map file: OTHER is the built-in one now.
+    expect(normalizeMap(versionOf(v2, 1)!.map, OTHER)).toBe(BUILT_IN);
+    expect(normalizeMap(versionOf(v2, 1)!.map, BUILT_IN)).toBeNull();
   });
 
   it('moves a draft that was only looked at onto the newer version', () => {
@@ -221,6 +231,76 @@ describe('keeping the draft in the browser', () => {
   });
 });
 
+describe('exporting the draft', () => {
+  it('marks it as a draft of the saved version, never a version of its own', () => {
+    const file = saved({ npcs: { mr_gravy: { speed: 1.5 } } }, null, 4);
+    const draft = { ...withValue(draftFrom(file, BUILT_IN), 'npcs.student.speed', 3), map: EDITED, note: 'students faster' };
+    const out = exportedDraft(draft, file, '2026-10-13T14:01:00.000Z');
+    expect(out).toMatchObject({ revision: 4, draftOf: 4, exportedAt: '2026-10-13T14:01:00.000Z', savedAt: null, note: 'students faster', map: EDITED, history: [] });
+    expect(getPath(valuesWith(out.values), 'npcs.student.speed')).toBe(3);
+    // Read back (Import), it is still a draft of version 4.
+    expect(parseTuning(stringifyTuning(out)).file).toEqual(out);
+  });
+});
+
+describe('two tabs keeping one draft', () => {
+  const base = draftFrom(saved({ npcs: { mr_gravy: { speed: 1.5 } } }), BUILT_IN);
+
+  it('tells drafts apart by values, map, note and version (not by how the map is written)', () => {
+    expect(sameDraft(base, { ...base }, BUILT_IN)).toBe(true);
+    expect(sameDraft(base, withValue(base, 'npcs.student.speed', 3), BUILT_IN)).toBe(false);
+    expect(sameDraft(base, { ...base, note: 'x' }, BUILT_IN)).toBe(false);
+    expect(sameDraft(base, { ...base, baseRevision: 4 }, BUILT_IN)).toBe(false);
+    expect(sameDraft(base, { ...base, map: EDITED }, BUILT_IN)).toBe(false);
+    expect(sameDraft(base, { ...base, map: serializeMap(built.rows, built.names) }, BUILT_IN)).toBe(true);
+  });
+
+  it("keeps both tabs' edits: theirs, with this tab's on top", () => {
+    const mine = { ...withValue(base, 'npcs.student.speed', 3), note: 'students faster' };
+    const theirs = { ...withValue(base, 'characters.dalton.stats.speed', 4), map: EDITED };
+    const merged = mergeDrafts(base, mine, theirs, BUILT_IN);
+    const values = valuesWith(merged.values);
+    expect(getPath(values, 'npcs.student.speed')).toBe(3);
+    expect(getPath(values, 'characters.dalton.stats.speed')).toBe(4);
+    expect(getPath(values, 'npcs.mr_gravy.speed')).toBe(1.5);
+    expect(merged).toMatchObject({ map: EDITED, note: 'students faster', baseRevision: 3 });
+  });
+
+  it("lets this tab's edit win where both changed the same thing, an optional range switched off included", () => {
+    const mine = withValue(withValue(base, 'npcs.mr_gravy.speed', 1.25), 'fixtures.desk.range', null);
+    const theirs = withValue(base, 'npcs.mr_gravy.speed', 3);
+    const merged = mergeDrafts(base, mine, theirs, BUILT_IN);
+    expect(merged.values).toEqual({ npcs: { mr_gravy: { speed: 1.25 } }, fixtures: { desk: { range: null } } });
+    // An edit put back to where this tab started is no edit: theirs stays.
+    expect(mergeDrafts(base, { ...base }, theirs, BUILT_IN)).toEqual(theirs);
+  });
+
+  it("a tab with no edits of its own takes the other tab's draft whole, its version too", () => {
+    const theirs = { ...withValue(base, 'balance.shift.lengthSeconds', 420), map: EDITED, note: 'longer', baseRevision: 4 };
+    expect(mergeDrafts(base, base, theirs, BUILT_IN)).toEqual(theirs);
+  });
+});
+
+describe('telling whether a save landed', () => {
+  const v1 = makeSave({ values: valuesWith({ npcs: { mr_gravy: { speed: 1.5 } } }), map: null, note: 'mine', previous: emptyTuning(), now: '2026-10-12T12:00:00.000Z', builtInMap: BUILT_IN });
+  const v2 = makeSave({ values: DEFAULTS, map: null, note: 'later', previous: v1, now: '2026-10-12T13:00:00.000Z', builtInMap: BUILT_IN });
+
+  it('finds the save by its number and its time, also once newer versions are on top', () => {
+    expect(saveLanded(v1, { revision: 1, savedAt: v1.savedAt! })).toBe(true);
+    expect(saveLanded(v2, { revision: 1, savedAt: v1.savedAt! })).toBe(true);
+  });
+
+  it("doesn't take someone else's version with the same number for it", () => {
+    expect(saveLanded(v1, { revision: 1, savedAt: '2026-10-12T12:00:00.001Z' })).toBe(false);
+    expect(saveLanded(emptyTuning(), { revision: 1, savedAt: v1.savedAt! })).toBe(false);
+  });
+
+  it('goes by the number alone for a stash without a time', () => {
+    expect(saveLanded(v2, { revision: 1 })).toBe(true);
+    expect(saveLanded(emptyTuning(), { revision: 1 })).toBe(false);
+  });
+});
+
 describe('reopening after a save', () => {
   it('uses the stash up, except for a second reload straight after the first', () => {
     const { store, map } = memory();
@@ -233,6 +313,13 @@ describe('reopening after a save', () => {
     expect(takeSession(store, 2001 + SESSION_RELOAD_MS)).toBeNull();
     expect(map.size).toBe(0);
     expect(takeSession(store, 2002 + SESSION_RELOAD_MS)).toBeNull();
+  });
+
+  it("keeps the save's time and the refusal", () => {
+    const { store } = memory();
+    const session = { tab: 'gravy', crew: 'dalton', saving: { revision: 4, target: 'artifact', savedAt: '2026-10-12T12:00:00.000Z' }, conflict: true, at: 1000 };
+    stashSession(store, session);
+    expect(takeSession(store, 2000)).toEqual(session);
   });
 
   it('is forgotten when the Studio closes', () => {

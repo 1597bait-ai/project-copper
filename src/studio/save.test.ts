@@ -311,7 +311,8 @@ describe('saving on claude.ai', () => {
     installDocument(LIVE);
     const { error } = await outcome(save.saveTuning(savedFile(), env));
     expect(error).toBeInstanceOf(save.SaveError);
-    expect(error).toMatchObject({ code: expected });
+    // A refusal is an answer: nothing was published.
+    expect(error).toMatchObject({ code: expected, uncertain: false });
     expect(error?.message).not.toBe('');
     expect(claude.publish).toHaveBeenCalledTimes(1);
   });
@@ -344,7 +345,8 @@ describe('saving on claude.ai', () => {
     const result = outcome(save.saveTuning(savedFile(), env));
     await vi.advanceTimersByTimeAsync(1_500);
     const { error } = await result;
-    expect(error).toMatchObject({ code: 'failed' });
+    // The first try may have been published, only its answer lost.
+    expect(error).toMatchObject({ code: 'failed', uncertain: true });
     expect(error?.message).toMatch(/network down/);
     expect(publish).toHaveBeenCalledTimes(2);
   });
@@ -356,7 +358,8 @@ describe('saving on claude.ai', () => {
     installDocument(LIVE);
     const result = outcome(save.saveTuning(savedFile(), env));
     await vi.advanceTimersByTimeAsync(60_000);
-    expect((await result).error).toMatchObject({ code: 'failed' });
+    // It may still land (and reload the page), so the Studio keeps what it needs to tell.
+    expect((await result).error).toMatchObject({ code: 'failed', uncertain: true });
     expect(publish).toHaveBeenCalledTimes(1);
   });
 });
@@ -491,6 +494,13 @@ describe('exporting the tuning file', () => {
     expect(writeText).not.toHaveBeenCalled();
     vi.advanceTimersByTime(60_000);
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:copper');
+  });
+
+  it('names an exported draft after the version it was started from (it is no version itself)', async () => {
+    const { links } = installDocument(LIVE);
+    installClipboard();
+    await save.exportTuning({ ...file, draftOf: 1, exportedAt: '2026-10-13T14:01:00.000Z' });
+    expect(links[0]).toMatchObject({ download: 'copper-tuning-draft-from-v1.json' });
   });
 
   it('copies it where there is no page to download from, and shows it as a last resort', async () => {

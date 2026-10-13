@@ -84,11 +84,12 @@ export function readNumber(field: Field, text: string): Reading<number> {
   return { value: r.value, note: fitNote(field, k, raw, r.value) };
 }
 
-/** The slider's range, in the same units as the input. */
+/** The slider's range (its own where the field has one), in the same units as the input. */
 export function sliderRange(field: Field): { min: string; max: string; step: string } {
   const k = field.kind as NumberKind;
   const s = inputScale(field);
-  return { min: toInput(k.min, s), max: toInput(k.max, s), step: toInput(stepOf(k), s) };
+  const [min, max] = k.slider ?? [k.min, k.max];
+  return { min: toInput(min, s), max: toInput(max, s), step: toInput(stepOf(k), s) };
 }
 
 /**

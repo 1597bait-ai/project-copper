@@ -6,6 +6,7 @@
 // Previews show what a value means in play ("walks 3.2 tiles/s"). They read the values being
 // edited, never the live config.
 
+import { clockText } from '../systems/clock';
 import { CHARACTER_ORDER, CHARACTERS, ABILITIES } from './characters';
 import { FIXTURES } from './fixtures';
 import { MATERIAL_ORDER, MATERIALS } from './materials';
@@ -17,8 +18,12 @@ export interface Option {
 }
 
 export type FieldKind =
-  /** A number, clamped to [min, max] and rounded to `step` (whole numbers when `int`). */
-  | { type: 'number'; min: number; max: number; step: number; unit?: string; int?: boolean; percent?: boolean }
+  /**
+   * A number, clamped to [min, max] and rounded to `step` (whole numbers when `int`). `slider`: the
+   * slider's own, narrower range where the limits are far wider than sensible values (prices go to
+   * $1000, but a slider that long can't pick $12); typing still takes anything within the limits.
+   */
+  | { type: 'number'; min: number; max: number; step: number; unit?: string; int?: boolean; percent?: boolean; slider?: [number, number] }
   /** A [low, high] pair, low <= high. */
   | { type: 'range'; min: number; max: number; step: number; unit?: string }
   /** A [low, high] pair, or null for "none" (a fixture's random yield range). */
@@ -78,6 +83,12 @@ function stripSeconds(v: Values, characterId: string, fixtureId: string): number
   return (f.workSeconds * v.balance.repair.reference) / Math.max(0.25, c.stats.repair + bonus);
 }
 const crewLine = (v: Values, each: (id: string) => string) => CHARACTER_ORDER.map((id) => `${v.characters[id].name} ${each(id)}`).join(' · ');
+/** The shift clock's span, as the HUD shows it (an end before the start is moved, see systems/clock.ts). */
+const clockSpan = (v: Values) => {
+  const s = v.balance.shift;
+  const span = `${clockText(0, s)} to ${clockText(1, s)}`;
+  return s.endHour > s.startHour ? `the clock runs ${span}` : `ends before it starts, so the clock runs ${span}`;
+};
 
 // ---- option lists ----------------------------------------------------------------------
 
@@ -107,9 +118,16 @@ const fixtureOptions = (): Option[] => Object.values(FIXTURES).map((f) => ({ val
 // ---- field builders ---------------------------------------------------------------------
 
 type Draft = Omit<Field, 'where'>;
-const num = (path: string, label: string, min: number, max: number, step: number, extra: Partial<Draft> & { unit?: string; int?: boolean; percent?: boolean } = {}): Draft => {
-  const { unit, int, percent, ...rest } = extra;
-  return { path, label, kind: { type: 'number', min, max, step, unit, int, percent }, ...rest };
+const num = (
+  path: string,
+  label: string,
+  min: number,
+  max: number,
+  step: number,
+  extra: Partial<Draft> & { unit?: string; int?: boolean; percent?: boolean; slider?: [number, number] } = {},
+): Draft => {
+  const { unit, int, percent, slider, ...rest } = extra;
+  return { path, label, kind: { type: 'number', min, max, step, unit, int, percent, ...(slider ? { slider } : {}) }, ...rest };
 };
 const range = (path: string, label: string, min: number, max: number, step: number, unit?: string, extra: Partial<Draft> = {}): Draft => ({
   path,
@@ -186,8 +204,8 @@ const crew = section(
         titlePath: `abilities.${a.id}.name`,
         help: 'An ability (Q / the HIDE button).',
         fields: [
+          // Its description isn't here: nothing in the game shows it (yet).
           text(`abilities.${a.id}.name`, 'Name', 32),
-          text(`abilities.${a.id}.description`, 'Description', 140),
           num(`abilities.${a.id}.duration`, 'Lasts', 0.5, 60, 0.5, { unit: 's' }),
           num(`abilities.${a.id}.cooldown`, 'Cooldown', 0, 300, 1, { unit: 's', help: 'Counted from when it starts.' }),
         ],
@@ -373,7 +391,7 @@ const coworker = section('coworker', 'Sleepy Coworker', 'Naps under desks. Finis
     fields: [
       num('balance.sleepyCoworker.chance', 'Chance he is under the desk', 0, 1, 0.01, { percent: true }),
       num('balance.sleepyCoworker.maxPerShift', 'At most this many times a shift', 0, 20, 1, { int: true }),
-      num('balance.sleepyCoworker.hushMoney', 'He pays', 0, 1000, 5, { unit: '$' }),
+      num('balance.sleepyCoworker.hushMoney', 'He pays', 0, 1000, 5, { unit: '$', slider: [0, 300] }),
       { path: 'balance.sleepyCoworker.napsUnder', label: 'Naps under', kind: { type: 'set', options: fixtureOptions() } },
     ],
   },
@@ -407,7 +425,7 @@ const loot = section('loot', 'Scrap & Loot', 'What scrap sells for, and what eac
     title: 'Scrap prices',
     help: 'Dollars per unit of scrap sold at the van.',
     fields: MATERIAL_ORDER.flatMap((id) => [
-      num(`materials.${id}.pricePerUnit`, `${MATERIALS[id].name} price`, 0, 1000, 0.5, { unit: '$/unit' }),
+      num(`materials.${id}.pricePerUnit`, `${MATERIALS[id].name} price`, 0, 1000, 0.5, { unit: '$/unit', slider: [0, 100] }),
       text(`materials.${id}.name`, `${MATERIALS[id].name} name`, 24, { advanced: true }),
     ]),
   },
@@ -450,10 +468,11 @@ const shift = section('shift', 'Shift & Rules', 'How long a shift lasts, warning
     fields: [
       num('balance.shift.lengthSeconds', 'Shift length (real time)', 30, 3600, 10, {
         unit: 's',
+        slider: [60, 1200],
         preview: (v) => `${Math.floor(v.balance.shift.lengthSeconds / 60)} min ${v.balance.shift.lengthSeconds % 60} s`,
       }),
-      num('balance.shift.startHour', 'Clock starts at', 0, 23, 1, { int: true, unit: 'h' }),
-      num('balance.shift.endHour', 'Clock ends at', 1, 24, 1, { int: true, unit: 'h' }),
+      num('balance.shift.startHour', 'Clock starts at', 0, 23, 1, { int: true, unit: 'h', preview: clockSpan }),
+      num('balance.shift.endHour', 'Clock ends at', 1, 24, 1, { int: true, unit: 'h', preview: clockSpan }),
       num('balance.shift.lastCallAt', '"Almost over" reminder at (share of the shift)', 0, 1, 0.01, { percent: true }),
       num('balance.warningsUntilFired', 'Warnings until fired', 1, 10, 1, { int: true }),
       num('balance.graceSeconds', 'Mr. Gravy ignores you after a warning for', 0, 30, 0.5, { unit: 's' }),

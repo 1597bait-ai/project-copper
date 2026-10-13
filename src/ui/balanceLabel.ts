@@ -27,6 +27,11 @@ export function setPlayTestLabel(text: string | null): void {
   playTest = text;
 }
 
+/** True while Copper Studio plays its draft: such a shift doesn't count toward the player's own progress. */
+export function isPlayTest(): boolean {
+  return playTest !== null;
+}
+
 /** The label to show now, or null. */
 export function currentBalanceLabel(): string | null {
   return playTest ?? balanceLabel(activeTuning());

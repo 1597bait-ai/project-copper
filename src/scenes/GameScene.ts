@@ -23,6 +23,7 @@ import { sfx } from '../systems/sfx';
 import { chatterDelays, hearsYell, yellRaisesAlarm } from '../systems/studentMind';
 import { DEPTH } from '../ui/depth';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
+import { numberWord } from '../ui/words';
 import { parseMap } from '../world/mapText';
 import { DEFAULT_MAP, currentMapText } from '../world/maps';
 import { validateMap } from '../world/validate';
@@ -252,7 +253,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.time.delayedCall(600, () =>
-      this.toast(`7:00 AM — fill your bag, get it to the van. Don't let ${NPCS.mr_gravy.name} see you with scrap!`, '#f6f1e5', 4200),
+      this.toast(`${clockText(0)} — fill your bag, get it to the van. Don't let ${NPCS.mr_gravy.name} see you with scrap!`, '#f6f1e5', 4200),
     );
   }
 
@@ -392,7 +393,8 @@ export class GameScene extends Phaser.Scene {
     const lines = GRAVY_LINES.caught;
     this.boss.say(lines[Math.min(this.warnings, lines.length) - 1], 2.4);
     if (this.warnings >= BALANCE.warningsUntilFired) {
-      this.toast("THREE WARNINGS — YOU'RE FIRED!", '#ff5a4f', 2500);
+      const n = this.warnings;
+      this.toast(`${numberWord(n).toUpperCase()} WARNING${n === 1 ? '' : 'S'} — YOU'RE FIRED!`, '#ff5a4f', 2500);
       this.over = true;
       this.freezeActors();
       this.time.delayedCall(1600, () => this.endShift(true));

@@ -26,6 +26,7 @@ import {
   countBySection,
   DRAFT_KEY,
   draftFrom,
+  exportedDraft,
   loadDraft,
   MAP_PATH,
   mapsDiffer,
@@ -54,6 +55,8 @@ const HISTORY_TAB = 'history';
 const BUILT_IN = DEFAULT_MAP.text;
 
 type NoteKind = 'good' | 'warn' | 'bad' | 'info';
+/** What a Save publishes: the draft as the Save dialog showed it. */
+type SaveSnapshot = { values: Values; map: string | null };
 interface NoteAction {
   label: string;
   run: () => void;
@@ -89,7 +92,7 @@ function saveErrorText(e: SaveError, kept: boolean): string {
 }
 
 /** Warns before saving when the draft can't be kept: a refused save reloads the page, and the changes would go with it. */
-const UNKEPT_WARNING = 'This browser can’t keep the draft (its storage is blocked). If someone saved a newer version first, the page reloads to it and these changes are lost: Export them first to be safe.';
+const UNKEPT_WARNING = 'This browser can’t keep the draft (its storage is blocked). If someone saved a newer version first, the page reloads to it and these changes are lost, so export them first to be safe.';
 
 export class Studio {
   // ---- what is being edited
@@ -298,6 +301,8 @@ export class Studio {
     this.session = null;
     if (session?.tab && this.isTab(session.tab)) this.tab = session.tab;
     const saving = session?.saving;
+    // A newer version than the draft's came from someone else (another tab, another device, Claude).
+    let theirs = false;
     if (saving) {
       const rev = this.saved.revision;
       // Also after a "newer version" refusal: that version can be this save, when the answer to its
@@ -308,13 +313,13 @@ export class Studio {
             ? 'It is in src/config/tuning.json (and the map file): commit them to keep it.'
             : 'Everyone who opens the game gets it now.';
         notes.push(['saved', 'good', `Saved as version ${saving.revision}. ${where}`, []]);
-        // The draft is what was saved (plus any edits since): it starts from that version now.
-        if (this.draft.baseRevision < saving.revision) this.draft = { ...this.draft, baseRevision: saving.revision };
-        if (this.unsavedCount() === 0) this.draft = { ...this.draft, baseRevision: rev, note: '' };
-      } else if (!session.conflict) {
+        // The draft is what was saved (plus any edits made since): it starts from that version now, its note used up.
+        this.draft = { ...this.draft, baseRevision: Math.max(this.draft.baseRevision, saving.revision), note: '' };
+      } else if (session.conflict || rev >= saving.revision) {
+        theirs = true;
+        if (!stored) notes.push(['saved', 'bad', `Someone saved version ${rev} first, and this browser couldn't keep your draft (its storage is blocked).`, []]);
+      } else {
         notes.push(['saved', 'bad', `The save didn't arrive: the game is still on version ${rev}.${stored ? ' Your draft is kept, so you can save again.' : ''}`, []]);
-      } else if (!stored) {
-        notes.push(['saved', 'bad', `Someone saved version ${rev} first, and this browser couldn't keep your draft (its storage is blocked).`, []]);
       }
     }
     // The draft started from another version than the game runs now: someone saved since (in
@@ -329,7 +334,7 @@ export class Studio {
       this.draft = r.draft;
       this.draftValues = valuesWith(this.draft.values);
       if (r.kept.length) {
-        const lead = session?.conflict ? `Someone saved version ${rev} while you were working.` : `Version ${rev} was saved after this draft was started (from version ${base}).`;
+        const lead = theirs ? `Someone saved version ${rev} while you were working.` : `Version ${rev} was saved after this draft was started (from version ${base}).`;
         const kept = r.kept.length === 1 ? 'Your edit is' : `Your ${r.kept.length} edits are`;
         const n = r.clashes.length;
         const clash = n ? ` Version ${rev} changed ${this.names(r.clashes)} too: yours ${n === 1 ? 'is' : 'are'} kept, so check ${n === 1 ? 'it' : 'them'}.` : '';
@@ -392,7 +397,8 @@ export class Studio {
       '▶ Play',
       h('span', { class: 'cs-wide' }, ' test'),
     );
-    this.saveButton = h('button', { class: 'cs-btn is-primary', type: 'button', onClick: () => this.openSave() }, 'Save to game');
+    // "Save" on the narrowest phones, so the header's buttons stay on one row.
+    this.saveButton = h('button', { class: 'cs-btn is-primary', type: 'button', onClick: () => this.openSave() }, 'Save', h('span', { class: 'cs-roomy' }, ' to game'));
     this.moreButton = h('button', { class: 'cs-btn is-icon', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'More', title: 'More', onClick: () => this.toggleMenu() }, '⋯');
     const item = (label: string, hint: string, run: () => void, danger = false) =>
       h(
@@ -421,11 +427,11 @@ export class Studio {
       item('Exit studio', 'Back to the game (the draft is kept)', () => this.exit()),
     );
     this.menu.addEventListener('keydown', (e) => this.menuKeys(e));
+    // Under the open menu, over everything else: a press outside the menu only closes it (it would
+    // paint the map on the Map tab). It closes on the click, so a tap's click lands on the shield too.
     this.menuShield = h('div', { class: 'cs-shield', hidden: true, 'aria-hidden': 'true' });
-    this.menuShield.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      this.toggleMenu(false);
-    });
+    this.menuShield.addEventListener('pointerdown', (e) => e.preventDefault());
+    this.menuShield.addEventListener('click', () => this.toggleMenu(false));
     const menuWrap = h('div', { class: 'cs-menuwrap' }, this.moreButton, this.menu);
     const head = h(
       'header',
@@ -553,7 +559,9 @@ export class Studio {
     if (!theirs || (this.stored && sameDraft(theirs, this.stored, BUILT_IN))) return;
     // The map editor's latest strokes belong to this tab's edits.
     this.stage.editor?.flush();
-    const merged = mergeDrafts(this.stored ?? draftFrom(this.saved, BUILT_IN), this.draft, theirs, BUILT_IN);
+    const base = this.stored ?? draftFrom(this.saved, BUILT_IN);
+    const mine = !sameDraft(this.draft, base, BUILT_IN);
+    const merged = mergeDrafts(base, this.draft, theirs, BUILT_IN);
     this.stored = theirs;
     this.dirty = !sameDraft(merged, theirs, BUILT_IN);
     if (sameDraft(merged, this.draft, BUILT_IN)) return;
@@ -564,7 +572,7 @@ export class Studio {
     this.refresh();
     const editor = this.stage.editor;
     if (editor && mapsDiffer(mapBefore, merged.map, BUILT_IN)) editor.loadMap(merged.map ?? BUILT_IN, 'Another tab changed the map. UNDO brings this one back.');
-    this.note('tabs', 'info', 'This draft was changed in another tab too: its edits are in here now, and yours are kept.', []);
+    this.note('tabs', 'info', mine ? 'This draft was changed in another tab too: its edits are in here now, and yours are kept.' : 'This draft was changed in another tab: its edits are in here now.', []);
     if (this.dirty) this.persistSoon();
   }
 
@@ -614,10 +622,14 @@ export class Studio {
     const mapChanged = this.mapChanged();
     const count = paths.length + (mapChanged ? 1 : 0);
     const rev = this.saved.revision;
-    // Phones show the short forms ("v0 · shipped", "2 unsaved"): .cs-wide parts hide there.
+    // Phones show the short forms ("v0 · shipped", "2 unsaved"): .cs-wide parts hide there, and
+    // .cs-roomy ones on the narrowest ("v3", its date in the tooltip).
     const wide = (text: string) => h('span', { class: 'cs-wide' }, text);
-    this.versionChip.replaceChildren(wide('Live '), h('b', null, `v${rev}`), ' · ', rev ? shortDate(this.saved.savedAt) || 'saved' : h('span', null, 'shipped', wide(' values')));
-    this.versionChip.title = rev ? `The version the game runs now${this.saved.note ? `: “${this.saved.note}”` : ''}` : 'The game runs the values its code ships with';
+    const day = rev ? shortDate(this.saved.savedAt) : '';
+    this.versionChip.replaceChildren(wide('Live '), h('b', null, `v${rev}`), h('span', { class: 'cs-roomy' }, ' · ', rev ? day || 'saved' : h('span', null, 'shipped', wide(' values'))));
+    this.versionChip.title = rev
+      ? `The version the game runs now${day ? `, saved ${day}` : ''}${this.saved.note ? `: “${this.saved.note}”` : ''}`
+      : 'The game runs the values its code ships with';
     this.versionChip.dataset.revision = String(rev);
     this.dirtyChip.classList.toggle('is-dirty', count > 0);
     this.dirtyChip.dataset.unsaved = String(count);
@@ -912,15 +924,16 @@ export class Studio {
       return;
     }
     this.stage.editor?.flush();
-    const lines = changeLines({ values: this.savedValues, map: this.saved.map }, { values: this.draftValues, map: this.draft.map }, BUILT_IN);
-    const errors = this.mapErrors();
+    // Save publishes exactly what this dialog lists and checked: an edit made while it is open (in
+    // another tab, say) waits for the next save.
+    const snap: SaveSnapshot = { values: this.draftValues, map: this.draft.map };
+    const lines = changeLines({ values: this.savedValues, map: this.saved.map }, snap, BUILT_IN);
+    const errors = this.mapErrors(snap.map);
+    const kept = this.persistNow();
     const revision = this.saved.revision + 1;
     const note = h('textarea', { class: 'cs-note-input', id: 'cs-save-note', rows: 3, maxlength: 500, placeholder: 'What changed? e.g. Gravy slower — testers said he’s too fast' });
     note.value = this.draft.note;
-    note.addEventListener('input', () => {
-      this.draft = { ...this.draft, note: note.value };
-      this.persistSoon();
-    });
+    note.addEventListener('input', () => this.setNote(note.value, false));
     const where =
       env.target === 'dev'
         ? 'This writes the draft into the project: src/config/tuning.json, and the map into src/assets/maps/lincoln.txt. Commit them to keep it.'
@@ -942,6 +955,9 @@ export class Studio {
             ),
           )
         : null,
+      kept
+        ? null
+        : h('div', { class: 'cs-box is-warn' }, `${UNKEPT_WARNING} `, h('button', { class: 'cs-link', type: 'button', onClick: () => void this.exportDraft() }, 'Export the draft')),
       status,
     ];
     const dialog: Dialog = this.dialog({
@@ -949,18 +965,29 @@ export class Studio {
       body,
       actions: [
         { label: 'Cancel' },
-        { label: `Save as version ${revision}`, kind: 'primary', disabled: errors.length > 0 || lines.length === 0, run: () => this.save(note.value, status, env, dialog) },
+        { label: `Save as version ${revision}`, kind: 'primary', disabled: errors.length > 0 || lines.length === 0, run: () => this.save(snap, note.value, status, env, dialog) },
       ],
     });
   }
 
+  /** The note for the next save. `now`: stored at once (else with the next store). */
+  private setNote(text: string, now: boolean): void {
+    if (text === this.draft.note) return;
+    this.draft = { ...this.draft, note: text };
+    this.dirty = true;
+    if (now) this.persistNow();
+    else this.persistSoon();
+  }
+
   /** Resolves false to keep the dialog open; never resolves while the page reloads. */
-  private async save(noteText: string, status: HTMLElement, env: SaveEnv, dialog: Dialog): Promise<boolean> {
-    const file = makeSave({ values: this.draftValues, map: this.draft.map, note: noteText, previous: this.saved, now: new Date().toISOString(), builtInMap: BUILT_IN });
-    this.draft = { ...this.draft, note: noteText };
-    this.persistNow();
-    // The page reloads after a save: this brings the Studio back, saying how it went.
-    const session: StudioSession = { tab: this.tab, crew: this.crew, saving: { revision: file.revision, target: env.target }, at: Date.now() };
+  private async save(snap: SaveSnapshot, noteText: string, status: HTMLElement, env: SaveEnv, dialog: Dialog): Promise<boolean> {
+    const file = makeSave({ values: snap.values, map: snap.map, note: noteText, previous: this.saved, now: new Date().toISOString(), builtInMap: BUILT_IN });
+    this.setNote(noteText, true);
+    // Whether the draft is in this browser's storage, so that a reload can't lose it.
+    const kept = this.persistNow();
+    // The page reloads after a save: this brings the Studio back, saying how it went. The save's
+    // time tells it apart from anyone else's version with the same number.
+    const session: StudioSession = { tab: this.tab, crew: this.crew, saving: { revision: file.revision, target: env.target, savedAt: file.savedAt ?? undefined }, at: Date.now() };
     stashSession(sessionStore(), session);
     status.replaceChildren(h('div', { class: 'cs-box' }, `Saving version ${file.revision}…`));
     /** The page reloads to the latest version: claude.ai does it, on the dev server we do. Never resolves. */
@@ -982,12 +1009,14 @@ export class Studio {
     } catch (e) {
       const err = e instanceof SaveError ? e : new SaveError('failed', e instanceof Error ? e.message : String(e));
       if (err.code === 'conflict') {
-        // A newer version was saved first: reload to it, keeping the draft (it is in localStorage).
-        stashSession(sessionStore(), { ...session, saving: undefined, conflict: true });
-        return reloading(saveErrorText(err), 'bad');
+        // A newer version was saved first: reload to it, keeping the draft (in localStorage, when the
+        // browser allows). The stash still names this save: the newer version may be this very save.
+        stashSession(sessionStore(), { ...session, conflict: true });
+        return reloading(saveErrorText(err, kept), 'bad');
       }
-      clearSession(sessionStore());
-      status.replaceChildren(h('div', { class: 'cs-box is-bad' }, saveErrorText(err)));
+      // Without an answer the save may still land and reload the page: the stash then says how it went.
+      if (!err.uncertain) clearSession(sessionStore());
+      status.replaceChildren(h('div', { class: 'cs-box is-bad' }, saveErrorText(err, kept)));
       dialog.buttons[1]?.focus();
       return false;
     }
@@ -997,6 +1026,7 @@ export class Studio {
     this.saved = file;
     this.savedValues = valuesWith(file.values);
     this.draft = { ...this.draft, baseRevision: file.revision, note: '' };
+    this.dirty = true;
     this.dropNote('newer');
     this.persistNow();
     this.refresh();
@@ -1005,22 +1035,23 @@ export class Studio {
 
   // ---- export, import, reset, discard, history -----------------------------------------------------
 
-  /** The draft as a tuning file (as a save would write it). */
-  private draftFile(note: string): TuningFile {
-    return makeSave({ values: this.draftValues, map: this.draft.map, note, previous: this.saved, now: new Date().toISOString(), builtInMap: BUILT_IN });
-  }
-
+  /**
+   * Hands over the draft as a tuning file. With unsaved changes it is marked as a draft (it isn't a
+   * version); without, it is the saved version itself, history and all (what pull takes in).
+   */
   private async exportDraft(): Promise<void> {
     this.stage.editor?.flush();
-    const file = this.draftFile(this.draft.note || 'Exported from Copper Studio');
+    const unsaved = this.unsavedCount() > 0;
+    const file = unsaved ? exportedDraft(this.draft, this.saved, new Date().toISOString()) : this.saved;
+    const what = unsaved ? 'the draft' : `version ${this.saved.revision}`;
     let how: 'downloaded' | 'copied' | 'shown' = 'shown';
     try {
       how = await exportTuning(file);
     } catch {
       how = 'shown';
     }
-    if (how === 'downloaded') this.toast('Downloaded the draft as a tuning file.', 'good');
-    else if (how === 'copied') this.toast('Copied the draft as a tuning file. Paste it anywhere to keep or send it.', 'good');
+    if (how === 'downloaded') this.toast(`Downloaded ${what} as a tuning file.`, 'good');
+    else if (how === 'copied') this.toast(`Copied ${what} as a tuning file. Paste it anywhere to keep or send it.`, 'good');
     else this.showExport(stringifyTuning(file));
   }
 
@@ -1073,7 +1104,7 @@ export class Studio {
           disabled: true,
           run: () => {
             if (!parsed) return false;
-            const label = parsed.revision ? `version ${parsed.revision}` : 'the file';
+            const label = parsed.draftOf !== undefined ? `the draft started from version ${parsed.draftOf}` : parsed.revision ? `version ${parsed.revision}` : 'the file';
             this.replaceDraft({ ...this.draft, values: parsed.values, map: normalizeMap(parsed.map, BUILT_IN) }, `Imported ${label} into the draft. Save to game makes it live.`);
             return true;
           },
@@ -1101,7 +1132,12 @@ export class Studio {
       const { file, warnings } = parseTuning(text);
       parsed = file;
       const diff = changeLines({ values: this.draftValues, map: this.draft.map }, { values: valuesWith(file.values), map: file.map }, BUILT_IN);
-      const about = [file.revision ? `Version ${file.revision}` : 'A tuning file', file.savedAt ? `, saved ${when(file.savedAt)}` : '', file.note ? `: “${file.note}”` : '', '. '].join('');
+      const about = [
+        file.draftOf !== undefined ? `A draft started from version ${file.draftOf}` : file.revision ? `Version ${file.revision}` : 'A tuning file',
+        file.draftOf !== undefined ? (file.exportedAt ? `, exported ${when(file.exportedAt)}` : '') : file.savedAt ? `, saved ${when(file.savedAt)}` : '',
+        file.note ? `: “${file.note}”` : '',
+        '. ',
+      ].join('');
       report.append(h('div', { class: 'cs-box is-good' }, `${about}${diff.length ? `${plural(diff.length, 'change')} from your draft.` : 'It is the same as your draft.'}`));
       if (warnings.length) {
         report.append(

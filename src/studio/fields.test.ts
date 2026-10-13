@@ -80,6 +80,13 @@ describe('numbers', () => {
     expect(limitsText(warnings)).toBe('1 to 10, in steps of 1');
   });
 
+  it("gives wide-ranging numbers a slider of sensible values, while typing still goes to the limits", () => {
+    const price = field('materials.copper.pricePerUnit');
+    expect(sliderRange(price)).toEqual({ min: '0', max: '100', step: '0.5' });
+    expect(readNumber(price, '450').value).toBe(450);
+    expect(sliderRange(field('balance.shift.lengthSeconds'))).toMatchObject({ min: '60', max: '1200' });
+  });
+
   it('moves a dragged slider with the finger, never to where it landed', () => {
     // A track 200 px wide for 0–1000: 20 px sideways is 100 more, wherever the drag started.
     expect(dragSlider(10, 20, 200, 0, 1000)).toBe(110);

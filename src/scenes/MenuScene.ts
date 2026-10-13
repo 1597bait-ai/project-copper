@@ -2,11 +2,12 @@ import Phaser from 'phaser';
 import { ABILITIES, CHARACTERS, CHARACTER_ORDER } from '../config/characters';
 import { oncePerKeyEvent } from '../input/Controls';
 import { knownSaveEnv, saveEnv } from '../studio/access';
-import { OPEN_STUDIO } from '../studio/hooks';
+import { HUD_LAYOUT, OPEN_STUDIO, type HudLayout } from '../studio/hooks';
 import { sfx, unlockAudio } from '../systems/sfx';
 import { loadSave, updateSave } from '../systems/save';
 import { currentBalanceLabel } from '../ui/balanceLabel';
-import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, drawCursor, fitColumn, fitWidth, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
+import { statPips } from '../ui/statPips';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, drawCursor, fitColumn, fitWidth, isPortrait, isTouchDevice, money, pixelRect, textStyle } from '../ui/theme';
 import { addTileLayers } from '../world/World';
 import { parseMap } from '../world/mapText';
 import { currentMapText } from '../world/maps';
@@ -56,7 +57,18 @@ export function addSchoolBackdrop(scene: Phaser.Scene, W: number, H: number): vo
  */
 export function addBalanceLabel(scene: Phaser.Scene, portrait: boolean): void {
   const label = currentBalanceLabel();
-  if (label) scene.add.text(24, 18, label, textStyle(portrait ? 30 : 24, COLORS.muted)).setOrigin(0, 0).setDepth(12);
+  if (!label) return;
+  const text = scene.add.text(24, 18, label, textStyle(portrait ? 30 : 24, COLORS.muted)).setOrigin(0, 0).setDepth(12);
+  // During a play test Copper Studio's floating button keeps clear of it, as it does of the HUD.
+  const cam = scene.cameras.main;
+  const screenX = (x: number) => cam.x + (x - cam.scrollX - cam.width * cam.originX) * cam.zoom + cam.width * cam.originX;
+  const screenY = (y: number) => cam.y + (y - cam.scrollY - cam.height * cam.originY) * cam.zoom + cam.height * cam.originY;
+  const box = { x: screenX(text.x), y: screenY(text.y), w: text.width * cam.zoom, h: text.height * cam.zoom };
+  const layout: HudLayout = { width: scene.scale.width, height: scene.scale.height, boxes: [box] };
+  scene.registry.set(HUD_LAYOUT, layout);
+  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+    if (scene.registry.get(HUD_LAYOUT) === layout) scene.registry.set(HUD_LAYOUT, null);
+  });
 }
 
 /** Title screen + crew select. Cards sit in a row in landscape and stack in portrait. */
@@ -217,11 +229,16 @@ export class MenuScene extends Phaser.Scene {
     const ability = c.ability ? ABILITIES[c.ability].name : 'No special ability (yet)';
     const abilityColor = c.ability ? '#6a3cb0' : COLORS.boxMuted;
     const pips = this.add.graphics();
+    // Every card's pips measure against the same highest stat (see statPips).
+    const highest = Math.max(...CHARACTER_ORDER.flatMap((cid) => Object.values(CHARACTERS[cid].stats)));
     // Stats as little bars, like a GBA status screen.
     const drawPips = (sx: number, sy: number, value: number) => {
-      for (let p = 0; p < 3; p++) {
-        drawBox(pips, sx + p * 54, sy - 13, 48, 26, { unit: 3, rim: null, fill: p < value ? c.color : 0xd8d4c8 });
-      }
+      statPips(value, highest).forEach((fill, p) => {
+        const px = sx + p * 54;
+        drawBox(pips, px, sy - 13, 48, 26, { unit: 3, rim: null, fill: fill >= 1 ? c.color : 0xd8d4c8 });
+        // Part of a pip: filled from the left, inside its outline.
+        if (fill > 0 && fill < 1) pixelRect(pips, px + 3, sy - 10, Math.max(6, 42 * fill), 20, 3, 1, c.color);
+      });
     };
     // Portrait in a light blue frame (the art faces the camera, upright).
     const pSize = compact ? 236 : 184;

@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { UI_ICONS } from '../art/ui';
+import { BALANCE } from '../config/balance';
 import { MATERIALS, MATERIAL_ORDER } from '../config/materials';
 import { controls, oncePerKeyEvent } from '../input/Controls';
 import { drawEdgeMarker } from '../entities/SpeechBubble';
@@ -107,6 +108,8 @@ export class HudScene extends Phaser.Scene {
   private dynamic!: Phaser.GameObjects.Graphics;
   private vignette!: Phaser.GameObjects.Graphics;
   private toasts: Toast[] = [];
+  /** The window layout this HUD last told Copper Studio about (HUD_LAYOUT). */
+  private layoutShown: HudLayout | null = null;
 
   private pauseZone!: Phaser.GameObjects.Zone;
   private actionZone!: Phaser.GameObjects.Zone;
@@ -197,7 +200,8 @@ export class HudScene extends Phaser.Scene {
       this.gameScene.events.off('dialogNext', this.nextDialog, this);
       this.gameScene.dialogOpen = false;
       this.gameScene.events.off('paused', this.showPause, this);
-      this.registry.set(HUD_LAYOUT, null);
+      // Unless the next screen (the menu, the end of the shift) put its own there already.
+      if (this.registry.get(HUD_LAYOUT) === this.layoutShown) this.registry.set(HUD_LAYOUT, null);
       this.dialog.clear();
       controls.reset();
     });
@@ -242,8 +246,12 @@ export class HudScene extends Phaser.Scene {
     this.alertBox = { x: W / 2 - 240 * s, y: this.clockTop + this.clockBox.h + 12 * s, w: 480 * s, h: 68 * s };
     // Speech bubbles in the game keep out from under the top row.
     this.gameScene.hudTop = Math.max(this.statusBox.y + this.statusBox.h, this.clockBox.y + this.clockBox.h, this.warnBox.y + this.warnBox.h);
-    // Copper Studio's floating button (during play tests) keeps clear of the windows.
-    this.registry.set(HUD_LAYOUT, { width: W, height: H, boxes: [this.statusBox, this.clockBox, this.warnBox, this.pauseBox, this.alertBox] } satisfies HudLayout);
+    // Copper Studio's floating button (during play tests) keeps clear of the windows, and of where
+    // toasts stack under the clock and the alert banner (room for the most there can be, two lines each).
+    const toastW = this.toastWrap() + 56 * s;
+    const toasts = { x: W / 2 - toastW / 2, y: this.clockTop + this.clockBox.h, w: toastW, h: 14 * s + this.alertBox.h + 12 * s + this.maxToasts() * (2 * 44 + 34) * s };
+    this.layoutShown = { width: W, height: H, boxes: [this.statusBox, this.clockBox, this.warnBox, this.pauseBox, this.alertBox, toasts] };
+    this.registry.set(HUD_LAYOUT, this.layoutShown);
 
     const st = this.statusBox;
     const tx = st.x + 84 * s;
@@ -384,7 +392,7 @@ export class HudScene extends Phaser.Scene {
     }
     setTextColor(this.bagText, full ? COLORS.boxBad : COLORS.boxText);
 
-    // Clock window, with the shift's progress and the coffee (noon) mark.
+    // Clock window, with the shift's progress and the mark where Mr. Gravy finishes his coffee.
     const cb = this.clockBox;
     drawBox(p, cb.x, cb.y, cb.w, cb.h, { unit: u });
     const px = cb.x + 30 * s;
@@ -393,9 +401,9 @@ export class HudScene extends Phaser.Scene {
     pixelRect(g, px, py, pw, 14 * s, u, 1, COLORS.boxEdge);
     g.fillStyle(0x4a5068, 1).fillRect(px + u, py + u, pw - 2 * u, 14 * s - 2 * u);
     g.fillStyle(COLORS.accent, 1).fillRect(px + u, py + u, Math.max(u, (pw - 2 * u) * h.progress), 14 * s - 2 * u);
-    g.fillStyle(COLORS.boxEdge, 1).fillRect(px + pw * 0.5 - u / 2, py - 4 * s, u, 14 * s + 8 * s);
+    g.fillStyle(COLORS.boxEdge, 1).fillRect(px + pw * BALANCE.shift.bossSpeedUpAt - u / 2, py - 4 * s, u, 14 * s + 8 * s);
 
-    // Warnings: three slots, filled red when used (like a trainer's party balls).
+    // Warnings: a slot for each, filled red when used (like a trainer's party balls).
     const wb = this.warnBox;
     drawBox(p, wb.x, wb.y, wb.w, wb.h, { unit: u });
     while (this.strikes.length < h.maxWarnings) this.strikes.push(this.add.image(0, 0, UI_ICONS.strikeOff));
@@ -728,9 +736,21 @@ export class HudScene extends Phaser.Scene {
 
   // ---- toasts ------------------------------------------------------------
 
+  /** How many toasts can be on screen at once. */
+  private maxToasts(): number {
+    return this.touch && !isPortrait(this.scale) ? MAX_TOASTS_SIDEWAYS_PHONE : MAX_TOASTS;
+  }
+
+  /** How wide a toast's text can get. Landscape: toasts sit beside the status window, so they stay narrower than the gap to it. */
+  private toastWrap(): number {
+    const s = this.ui;
+    const side = this.statusBox.x + this.statusBox.w + 16 * s;
+    return Math.min(isPortrait(this.scale) ? this.W - 104 * s : this.W - 2 * side - 56 * s, 1300 * s);
+  }
+
   private showToast(text: string, color: string, duration: number) {
     // Make room: the oldest goes (quickly) so the new one is never further down the screen.
-    const max = this.touch && !isPortrait(this.scale) ? MAX_TOASTS_SIDEWAYS_PHONE : MAX_TOASTS;
+    const max = this.maxToasts();
     while (this.toasts.length >= max) this.dropToast(this.toasts[0], 120);
     const t = this.add.text(0, 0, text, textStyle(34 * this.ui, color, { align: 'center' })).setOrigin(0.5, 0);
     const bg = this.add.graphics();
@@ -756,10 +776,7 @@ export class HudScene extends Phaser.Scene {
   /** Sizes a toast's text and window for the current HUD scale. */
   private styleToast(t: Toast) {
     const s = this.ui;
-    // Landscape: toasts sit beside the status window, so they stay narrower than the gap to it.
-    const side = this.statusBox.x + this.statusBox.w + 16 * s;
-    const wrap = isPortrait(this.scale) ? this.W - 104 * s : this.W - 2 * side - 56 * s;
-    setTextSize(t.text, 34 * s).setWordWrapWidth(Math.min(wrap, 1300 * s));
+    setTextSize(t.text, 34 * s).setWordWrapWidth(this.toastWrap());
     const w = t.text.width + 56 * s;
     const h = t.text.height + 24 * s;
     t.text.setPosition(0, 12 * s);

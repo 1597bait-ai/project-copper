@@ -67,7 +67,7 @@ npm run dev        # http://localhost:5173 (also on your Wi-Fi, so you can open 
 | `npm run build:single` | Whole game in one `dist-single/index.html` (works offline, easy to share) |
 | `npm run artifact` | The game page for claude.ai, `.tmp-artifact/project-copper.html`: the single-file build with the repo's balance inside (see [Copper Studio](#copper-studio-balancing-without-code)) |
 | `npm test` | Unit tests + "level lint" (every map is checked for unknown things, unreachable loot, a walkable patrol) |
-| `npm run e2e` | Plays through the rules, students, map editor and Copper Studio (a save round trip on the claude.ai page too) in a headless browser on desktop and phones, saving screenshots to `.smoke/` (run `npm run build` and `npm run build:single` first) |
+| `npm run e2e` | Plays through the rules, students, map editor and Copper Studio (save round trips on the claude.ai page too, two owners saving at once among them) in a headless browser on desktop and phones, saving screenshots to `.smoke/` (run `npm run build` and `npm run build:single` first) |
 | `npm run map:check` | Checks every map in `src/assets/maps/`, lists its problems and prints the loot-depth numbers `npm test` enforces |
 | `npm run map:format` | Rewrites map files with the current legend at the top |
 | `npm run art` | Re-renders the app icons (`public/icon-*.png`) |
@@ -91,20 +91,25 @@ number, play test it, save it.
 they mean in play ("walks 3.2 tiles/s", "sees 5 tiles, 80° cone") and stay within safe limits;
 rarely needed ones sit under "More settings". Changed settings are marked *Unsaved*, with **Undo**
 (back to the saved value) and **Reset** (back to the value the code ships with). The changes are a
-draft kept in this browser until you save. **▶ Play test** plays a shift with the draft and the
-crew member picked beside it; **◀ STUDIO** at the top comes back. The Map tab paints floors and
-walls, places things and moves Mr. Gravy's route; its problems panel says what would make the
-map unplayable, and a map with problems can't be play tested or saved.
+draft kept in this browser until you save; tabs of the game open side by side (the chat's preview
+and the shared link, say) share it, each taking in the other's edits. A browser that blocks site
+data can't keep it: the Studio says so, and Export keeps a copy. **▶ Play test** plays a shift
+with the draft and the crew member picked beside it (it doesn't count toward your best shift or
+totals); **◀ STUDIO** comes back. The Map tab paints floors and walls, places things and moves
+Mr. Gravy's route; its problems panel says what would make the map unplayable, and a map with
+problems can't be play tested or saved.
 
 **Save to game** saves the draft as the next version, with a note ("Gravy slower: testers said
 he's too fast"):
 - *On claude.ai* the game page republishes itself with the new balance inside. Everyone who
   opens the link gets it from then on, signed in or not, and copies that are open reload to it.
-  Only the owner or an editor can save.
+  Only the owner or an editor can save. If someone saved a newer version first (another device,
+  or Claude), the save is refused and the page reloads to theirs with your edits kept on top.
 - *With `npm run dev`* it writes `src/config/tuning.json` (and the map into
   `src/assets/maps/lincoln.txt`): commit them to keep it. A save made from an older version than
   the repo's (another tab saved first) is refused; the page reloads to the latest version with
-  your edits kept on top.
+  your edits kept on top. The dev server only takes a map the game can play, and only from the
+  game page (or a tool on the same computer).
 - *Anywhere else* (GitHub Pages, a downloaded copy) saving is off: export the tuning file instead.
 
 **The balance version.** Every save is a new version. The menu and the end-of-shift screen show
@@ -113,10 +118,12 @@ can say which balance they played when they report something. During a play test
 "Play test · draft" instead.
 
 **History** lists the last 30 saves with their notes and changes; **Load into draft** brings any
-of them back (or the shipped values), and Save to game makes it live again. The **⋯** menu has
-**Export…** (download or copy the draft as a tuning file, to keep or send), **Import…** (load a
-tuning file into the draft, e.g. one a tester sent), reset everything to the shipped values,
-discard the draft, and Exit studio (back to the game, running the saved version).
+of them back, on the map it was saved with (or the shipped values), and Save to game makes it live
+again. The **⋯** menu has **Export…** (download or copy the draft as a tuning file, to keep or
+send: with unsaved changes it is a draft of the saved version, `copper-tuning-draft-from-v3.json`,
+never a version of its own; with none, the saved version itself), **Import…** (load a tuning file
+into the draft, e.g. one a tester sent), reset everything to the shipped values, discard the
+draft, and Exit studio (back to the game, running the saved version).
 
 **Saved balance and code changes.** Balance saved on claude.ai lives in the published page, not
 in the repo, and publishing the game again replaces that page. So when Claude next changes the
@@ -125,7 +132,8 @@ code, it first pulls the saved balance from the live page, so nothing is lost:
    `node tools/artifact-page.mjs pull <that file>`: it writes `src/config/tuning.json` (values and
    history) and the map into `src/assets/maps/lincoln.txt`, and prints the version, note and
    changes. It refuses a page whose balance is older than the repo's or was saved separately from
-   it (`--force` overrides). An exported tuning file works too.
+   it (`--force` overrides). A version exported from the Studio works too, but not an exported
+   draft (import that in the Studio and save it).
 2. Commit that, make the code change, then `npm run artifact` and publish
    `.tmp-artifact/project-copper.html` to the **same** artifact, declaring the capabilities it
    prints (`{"artifact":{},"downloads":true}`), so the Studio can keep saving into it.
@@ -165,7 +173,8 @@ src/scenes/        Boot → Menu → Game + Hud → ShiftEnd, and the map Editor
 src/studio/        Copper Studio: forms built from the schema, the draft, play tests, saving
                    (save.ts: republish on claude.ai, repo files on the dev server) and the page format
 src/input/         keyboard, touch and gamepad all feed one Controls object
-src/ui/            theme (fonts, GBA-style windows, buttons), dialog box timing, depth order
+src/ui/            theme (fonts, GBA-style windows, buttons), dialog box timing, depth order, the
+                   balance label, crew card stat pips, counts in words
 src/assets/fonts/  the pixel fonts, part of the game (no network needed): Pixelify Sans for text and
                    Jersey 15 for digits (Pixelify's 5 looks like an S), with their licences (OFL)
 src/art/           all the pixel art, drawn in code at boot (no image files): tiles.ts (floors and

@@ -1,8 +1,9 @@
 // End-to-end check in a real (headless) browser. Plays through the core rules, the students, the
 // sleepy coworker and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
 // Studio: its settings, play tests and Map tab, a save round trip through the game page as
-// claude.ai publishes it, and the Studio on a phone; then the touch controls on phones held
-// sideways and upright. Saves screenshots to .smoke/.
+// claude.ai publishes it (two owners saving at once and two tabs of one browser too), and the
+// Studio on a phone; then the touch controls on phones held sideways and upright. Saves
+// screenshots to .smoke/.
 //
 //   npm run build && npm run build:single && npm run e2e
 //   E2E_URL=http://localhost:5173 npm run e2e     (against a running dev server instead)
@@ -421,14 +422,40 @@ const PAGE_URL = 'https://copper.test/game';
  * A stand-in for claude.ai, for open()'s `setup`: PAGE_URL serves the newest of `host.versions` (the
  * published page, wrapped in the host's skeleton). `canEdit` true or false gives the page claude.ai's
  * runtime (window.claude) for a viewer who may or may not publish; null is a viewer without it (not
- * signed in). A publish becomes the newest version, and the view reloads a moment later, as on claude.ai.
+ * signed in). Publishing is compare-and-set, as on claude.ai: a view still on an older version than
+ * the newest is refused with `conflict` (and reloaded to the newest); otherwise the page becomes the
+ * newest version and every open view reloads a moment later (with `reloadOthers: false` only the one
+ * that published: the others are asleep, say). `storage: false` blocks the page's browser storage.
  */
-function hostSetup(host, canEdit) {
+function hostSetup(host, canEdit, { reloadOthers = true, storage = true } = {}) {
+  host.served ??= new Map();
   return async (context) => {
-    await context.route(PAGE_URL, (route) => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: host.versions.at(-1) }));
+    await context.route(PAGE_URL, (route) => {
+      const page = route.request().frame()?.page();
+      if (page) host.served.set(page, host.versions.length - 1);
+      route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: host.versions.at(-1) });
+    });
+    if (!storage) {
+      // As in a private window, or with site data blocked: reading either storage throws.
+      await context.addInitScript(() => {
+        for (const name of ['localStorage', 'sessionStorage']) {
+          Object.defineProperty(window, name, {
+            get() {
+              throw new DOMException('Access is denied for this document.', 'SecurityError');
+            },
+          });
+        }
+      });
+    }
     if (canEdit === null) return;
-    await context.exposeBinding('__hostPublish', (_source, html) => {
+    await context.exposeBinding('__hostPublish', ({ page }, html) => {
+      const reload = (view, ms = 300) => setTimeout(() => view.reload().catch(() => {}), ms);
+      if (host.served.get(page) !== host.versions.length - 1) {
+        reload(page, 1000);
+        return { error: 'conflict' };
+      }
       host.versions.push(html);
+      for (const view of reloadOthers ? [...host.served.keys()] : [page]) if (!view.isClosed()) reload(view);
       return { version: `v${host.versions.length}` };
     });
     await context.addInitScript((canEdit) => {
@@ -437,7 +464,7 @@ function hostSetup(host, canEdit) {
           publish: async (html) => {
             if (!canEdit) throw Object.assign(new Error('Only the owner or an editor can publish.'), { code: 'not_writer' });
             const result = await window.__hostPublish(html);
-            setTimeout(() => location.reload(), 300);
+            if (result.error) throw Object.assign(new Error('A newer version was published first.'), { code: result.error });
             return result;
           },
         }),
@@ -1277,6 +1304,26 @@ if (runs('studio')) {
         after.note.startsWith(`Saved as version ${next}. Everyone who opens the game gets it now.`) && after.version === String(next) && after.unsaved === '0' && after.revision === next,
         after,
       );
+      // ▶ Play test at once: the page reloaded straight into the Studio, so the art may still be
+      // drawing, and the shift has to wait for it.
+      const artBefore = await page.evaluate(() => window.__COPPER__.game.registry.get('copper:art-ready') === true);
+      await page.click('.cs-play .cs-btn');
+      await sceneActive('Game');
+      await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.3 && window.__COPPER__.game.registry.get('hud:layout'));
+      const missing = await page.evaluate(() => {
+        const gm = window.__COPPER__.game;
+        let n = 0;
+        const walk = (list) =>
+          list.forEach((o) => {
+            if (o.texture?.key === '__MISSING') n++;
+            if (o.list) walk(o.list);
+          });
+        for (const key of ['Game', 'Hud']) walk(gm.scene.getScene(key).children.list);
+        return n;
+      });
+      check('...▶ Play test pressed straight away starts a shift with all its art (nothing drawn with the missing texture)', missing === 0, { artBefore, missing });
+      await page.click('.cs-back');
+      await kit.until(() => window.__COPPER__.studio.isOpen);
       // It comes back on the tab it saved from (the Map tab): its picture once the art is drawn again.
       if ((await page.getAttribute('.cs-tab[data-tab="map"]', 'aria-selected')) === 'true') await editorReady(kit);
       await shot('saved');
@@ -1558,6 +1605,132 @@ if (runs('studio')) {
       await sceneActive('Menu');
       check('no console errors (studio, phone)', errors.length === 0, errors);
       await context.close();
+    }
+
+    // ---- (f) two owners saving at once, two tabs of one browser, and storage that's blocked --------
+    {
+      const host2 = { versions: [wrapInHost(content)] };
+      const desk = { viewport: { width: 1280, height: 800 } };
+      const studioUp = () => !document.querySelector('.cs-head .cs-btn.is-primary').title.startsWith('Checking');
+      /** Saves the open Studio as version `n`, through the host's reload, back in the Studio. */
+      const saveAs = async (page, kit, n) => {
+        await page.click('.cs-head .cs-btn.is-primary');
+        await page.waitForSelector('.cs-dialog');
+        const reloaded = page.waitForEvent('load', { timeout: 90000 });
+        await page.getByRole('button', { name: `Save as version ${n}` }).click();
+        await reloaded;
+        await booted(page);
+        await kit.until(READY.studio);
+        await kit.until(studioUp);
+      };
+      // Device A's saves reload only itself: device B is asleep (a phone in a pocket) and stays on the old version.
+      const A = await open('owners-a', desk, { target: `${PAGE_URL}#studio`, setup: hostSetup(host2, true, { reloadOthers: false }), ready: 'studio' });
+      const B = await open('owners-b', desk, { target: `${PAGE_URL}#studio`, setup: hostSetup(host2, true), ready: 'studio' });
+      const ka = studioKit(A.page);
+      const kb = studioKit(B.page);
+      await ka.until(studioUp);
+      await kb.until(studioUp);
+      const gravyA = other(getPath(liveValues, GRAVY), 1.5, 2.5);
+      const daltonB = other(getPath(liveValues, DALTON), 4, 2);
+      await ka.tab('gravy');
+      await ka.type(GRAVY, gravyA);
+      await kb.tab('crew');
+      await kb.type(DALTON, daltonB);
+      await saveAs(A.page, ka, next);
+      // B saves from the version it loaded: refused, it reloads to A's, its own edit kept on top.
+      await B.page.click('.cs-head .cs-btn.is-primary');
+      await B.page.waitForSelector('.cs-dialog');
+      const reloadedB = B.page.waitForEvent('load', { timeout: 90000 });
+      await B.page.getByRole('button', { name: `Save as version ${next}` }).click();
+      const told = await B.page
+        .waitForFunction(() => /newer version/.test(document.querySelector('.cs-dialog .cs-box.is-bad')?.textContent ?? ''), null, { timeout: 20000, polling: 'raf' })
+        .then(
+          () => true,
+          () => false,
+        );
+      const toldText = told ? await B.page.locator('.cs-dialog .cs-box.is-bad').textContent() : null;
+      await reloadedB;
+      await booted(B.page);
+      await kb.until(() => window.__COPPER__.studio?.isOpen && document.querySelector('.cs-note[data-note="newer"]') !== null);
+      const rebased = await B.page.evaluate(() => ({ note: document.querySelector('.cs-note[data-note="newer"]').textContent, snap: window.__COPPER__.studio.snapshot() }));
+      check(
+        `two owners: a save from a view still on the old version is refused ("${toldText?.slice(0, 40)}…"), and the view reloads to version ${next} with its own edit kept on top`,
+        told &&
+          /Your draft is kept/.test(toldText ?? '') &&
+          rebased.note.startsWith(`Someone saved version ${next} while you were working. Your edit is kept on top of it.`) &&
+          getPath(valuesWith(rebased.snap.draft.values), DALTON) === daltonB &&
+          getPath(valuesWith(rebased.snap.draft.values), GRAVY) === gravyA &&
+          rebased.snap.draft.baseRevision === next &&
+          rebased.snap.unsaved === 1,
+        { toldText, rebased: { note: rebased.note, draft: rebased.snap.draft, unsaved: rebased.snap.unsaved } },
+      );
+      await B.shot('rebased');
+      // B saves again: everyone who has the game open reloads to it, A too.
+      await kb.until(studioUp);
+      const reloadedA = A.page.waitForEvent('load', { timeout: 90000 });
+      await saveAs(B.page, kb, next + 1);
+      await reloadedA;
+      await booted(A.page);
+      await ka.until(() => window.__COPPER__.studio?.isOpen && Number(document.querySelector('.cs-chip[data-revision]')?.dataset.revision) === window.__COPPER__.tuning().revision);
+      const onA = await A.page.evaluate(() => ({ revision: window.__COPPER__.tuning().revision, unsaved: window.__COPPER__.studio.snapshot().unsaved, values: window.__COPPER__.studio.snapshot().draft.values }));
+      check(
+        `...its save (version ${next + 1}, both edits) reloads every open view of the game: the other owner's shows it, nothing unsaved`,
+        host2.versions.length === 3 && onA.revision === next + 1 && onA.unsaved === 0 && getPath(valuesWith(onA.values), DALTON) === daltonB && getPath(valuesWith(onA.values), GRAVY) === gravyA,
+        onA,
+      );
+
+      // Two tabs of A's browser share one draft: neither loses the other's edits.
+      const tab2 = await A.context.newPage();
+      await tab2.goto(`${PAGE_URL}#studio`);
+      await booted(tab2);
+      const k2 = studioKit(tab2);
+      await k2.until(READY.studio);
+      const shiftA = other(getPath(valuesWith(onA.values), SHIFT), 240, 360);
+      const hushTab2 = other(getPath(valuesWith(onA.values), HUSH), 75, 40);
+      await ka.tab(sectionOf(SHIFT));
+      await ka.type(SHIFT, shiftA);
+      await k2.tab(sectionOf(HUSH));
+      await k2.type(HUSH, hushTab2);
+      const both = (k) => k.holds(([s, sv, hp, hv]) => {
+        const v = window.__COPPER__.studio.snapshot().draft.values;
+        const at = (p) => p.split('.').reduce((o, key) => o?.[key], v);
+        return at(s) === sv && at(hp) === hv;
+      }, [SHIFT, shiftA, HUSH, hushTab2], 10000);
+      const inA = await both(ka);
+      const inTab2 = await both(k2);
+      await tab2.close({ runBeforeUnload: true });
+      await A.page.waitForTimeout(500);
+      const kept = await A.page.evaluate(() => JSON.parse(localStorage.getItem('project-copper/studio/draft/v1') ?? 'null')?.values ?? null);
+      check(
+        'two tabs of one browser: each gets the other’s edits, and closing one keeps both in the stored draft',
+        inA && inTab2 && getPath(kept, SHIFT) === shiftA && getPath(kept, HUSH) === hushTab2,
+        { inA, inTab2, kept },
+      );
+      check('no console errors (two owners, two tabs)', A.errors.length === 0 && B.errors.length === 0, [...A.errors, ...B.errors]);
+      await A.context.close();
+      await B.context.close();
+
+      // A browser that won't keep anything: Save says what a refusal would cost, and offers Export.
+      const C = await open('blocked-storage', desk, { target: `${PAGE_URL}#studio`, setup: hostSetup(host2, true, { storage: false }), ready: 'studio' });
+      const kc = studioKit(C.page);
+      await kc.until(studioUp);
+      await kc.tab('gravy');
+      await kc.type(GRAVY, other(getPath(DEFAULTS, GRAVY), 1.25, 1.75));
+      await C.page.click('.cs-head .cs-btn.is-primary');
+      await C.page.waitForSelector('.cs-dialog');
+      const warned = await C.page.evaluate(() => ({
+        note: document.querySelector('.cs-note[data-note="storage"]')?.textContent ?? null,
+        box: document.querySelector('.cs-dialog .cs-box.is-warn')?.textContent ?? null,
+        exportButton: document.querySelector('.cs-dialog .cs-box.is-warn .cs-link')?.textContent ?? null,
+      }));
+      check(
+        "storage blocked: the Studio says the draft won't be kept, and Save warns a refused save would lose it, offering Export",
+        /storage is blocked/.test(warned.note ?? '') && /storage is blocked/.test(warned.box ?? '') && warned.exportButton === 'Export the draft',
+        warned,
+      );
+      await C.shot('save');
+      check('no console errors (storage blocked)', C.errors.length === 0, C.errors);
+      await C.context.close();
     }
   }
 }

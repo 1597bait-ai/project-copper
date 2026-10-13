@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyTuning, emptyTuning } from '../config/tuning';
-import { balanceLabel, currentBalanceLabel, setPlayTestLabel, shortDate } from './balanceLabel';
+import { balanceLabel, currentBalanceLabel, isPlayTest, setPlayTestLabel, shortDate } from './balanceLabel';
 
 afterEach(() => {
   applyTuning(emptyTuning());
@@ -23,9 +23,12 @@ describe('the balance label', () => {
 
   it('says so while the Studio plays its draft', () => {
     applyTuning({ ...emptyTuning(), revision: 5, savedAt: '2026-01-02T12:00:00Z' });
+    expect(isPlayTest()).toBe(false);
     setPlayTestLabel('Play test · unsaved draft');
     expect(currentBalanceLabel()).toBe('Play test · unsaved draft');
+    expect(isPlayTest()).toBe(true);
     setPlayTestLabel(null);
     expect(currentBalanceLabel()).toBe('Balance v5 · 2 Jan 2026');
+    expect(isPlayTest()).toBe(false);
   });
 });

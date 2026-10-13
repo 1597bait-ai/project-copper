@@ -70,8 +70,7 @@ const CSS = `
 
 /* ---- the More menu */
 .cs-menuwrap { position: relative; }
-/* Under the open menu, over everything else: a press outside only closes the menu (on the Map tab it
-   would otherwise paint the map too). */
+/* Under the open menu, over everything else (see Studio.ts). */
 .cs-shield { position: fixed; inset: 0; z-index: 5; }
 .cs-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 290px; max-width: calc(100vw - 24px); display: flex; flex-direction: column;
   padding: 6px; border: 1px solid var(--line2); border-radius: 10px; background: var(--panel); box-shadow: 0 14px 36px rgba(0,0,0,.55); }
@@ -214,6 +213,21 @@ const CSS = `
 .cs-back:hover { background: rgba(48,32,20,.95); }
 .cs-back:focus-visible { outline: 2px solid var(--copper-hi); outline-offset: 2px; }
 @media (pointer: coarse) { .cs-back { height: 44px; } }
+/* Phones held upright: narrow enough to sit beside the HUD's clock, under the warnings. */
+@media (max-width: 480px) { .cs-back { padding: 0 8px; font-size: 13px; letter-spacing: .03em; } }
+
+/* ---- phones held sideways (and other short windows): the sidebar stays, the header is one row */
+@media (max-height: 500px) and (min-width: 761px) {
+  .cs { grid-template-columns: 200px minmax(0, 1fr); }
+  .cs-head { gap: 8px 12px; padding: 6px 12px; }
+  .cs-logo { font-size: 15px; letter-spacing: .04em; margin-right: 0; }
+  .cs-chip { font-size: 12.5px; padding: 3px 8px; }
+  .cs-wide { display: none; }
+  .cs-narrow { display: inline; }
+  .cs-nav { gap: 8px; padding: 8px 8px 16px; }
+  .cs-tab { min-height: 36px; padding: 6px 10px; }
+  .cs-main { padding: 14px 16px 80px; }
+}
 
 /* ---- phones and narrow windows */
 @media (max-width: 760px) {
@@ -252,6 +266,10 @@ const CSS = `
   .cs-dialog-head, .cs-dialog-body, .cs-dialog-foot { padding-left: 14px; padding-right: 14px; }
   .cs-dialog-foot .cs-btn { flex: 1 1 auto; }
 }
+/* The narrowest phones (iPhone SE, small Androids): short forms, so the header keeps to two rows. */
+@media (max-width: 400px) { .cs-roomy { display: none; } }
+/* Touch screens: a setting's Undo and Reset are as easy to hit as every other control. */
+@media (pointer: coarse) { .cs-status .cs-link { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; } }
 `;
 
 /** Adds the Studio's stylesheet to the page (once). */

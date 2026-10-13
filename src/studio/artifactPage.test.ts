@@ -95,6 +95,11 @@ describe('pulling balance saved on claude.ai', () => {
     expect(pullTuning(stringifyTuning(file), tuning).tuningText).toBe(stringifyTuning(file));
   });
 
+  it('refuses a draft exported from the Studio (it was never saved), even forced', () => {
+    const draft = { ...claudeSave(null), revision: 1, draftOf: 1, exportedAt: '2026-10-13T14:01:00.000Z', savedAt: null, history: [] };
+    for (const force of [false, true]) expect(() => pullTuning(stringifyTuning(draft), tuning, { force })).toThrow(/draft exported from Copper Studio.*version 1.*Nothing was written/s);
+  });
+
   it('will not go back to older balance than the repo has, unless forced', () => {
     const older = page(claudeSave(null)); // version 1
     const repoTuning = stringifyTuning({ ...emptyTuning(), revision: 3, savedAt: '2026-10-12T12:00:00.000Z' });

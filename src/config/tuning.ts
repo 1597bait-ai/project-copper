@@ -187,7 +187,12 @@ export interface TuningHistoryEntry {
   note: string;
   /** What changed in that save ("Mr. Gravy › Speed: 2 → 1.5"). */
   changes: string[];
-  /** That save's values and map, so the Studio can load an older version back. */
+  /**
+   * That save's values and map, so the Studio can load an older version back. The map is kept even
+   * when it was the built-in one: the built-in school can change later (a dev server save writes the
+   * map file, so does a pull), and the version should still come back as it was. (Older files have
+   * null there: the built-in school, whatever it is now.)
+   */
   values: Overrides;
   map: string | null;
 }
@@ -207,6 +212,14 @@ export interface TuningFile {
   map: string | null;
   /** The latest saves, newest first. */
   history: TuningHistoryEntry[];
+  /**
+   * Only in a draft exported from Copper Studio (unsaved changes, sent to keep or to the developer):
+   * the saved version it was started from. A draft is never a version itself: `revision` is that
+   * version's too, and nothing is added to the history.
+   */
+  draftOf?: number;
+  /** When that draft was exported (ISO time). */
+  exportedAt?: string;
 }
 
 export function emptyTuning(): TuningFile {
@@ -236,6 +249,8 @@ export function parseTuning(text: string | null | undefined): { file: TuningFile
   if (typeof raw.savedAt === 'string') file.savedAt = raw.savedAt;
   if (typeof raw.note === 'string') file.note = raw.note.slice(0, 500);
   if (typeof raw.map === 'string' && raw.map.trim()) file.map = raw.map;
+  if (typeof raw.draftOf === 'number' && Number.isFinite(raw.draftOf)) file.draftOf = Math.max(0, Math.floor(raw.draftOf));
+  if (file.draftOf !== undefined && typeof raw.exportedAt === 'string') file.exportedAt = raw.exportedAt;
   if (Array.isArray(raw.history)) {
     file.history = raw.history
       .filter(isObject)
@@ -290,7 +305,7 @@ export function makeSave(input: SaveInput): TuningFile {
     note,
     values: overrides,
     map,
-    history: [{ revision, savedAt: now, note, changes, values: overrides, map }, ...previous.history].slice(0, HISTORY_LIMIT),
+    history: [{ revision, savedAt: now, note, changes, values: overrides, map: map ?? input.builtInMap }, ...previous.history].slice(0, HISTORY_LIMIT),
   };
 }
 

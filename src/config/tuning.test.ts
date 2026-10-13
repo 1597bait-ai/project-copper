@@ -34,6 +34,7 @@ const NOT_TUNABLE = [
   /^fixtures\.[^.]+\.(solid|wallMounted)$/,
   /^npcs\.student\.(awareness|name)$/, // students use their own vision settings and are never named
   /^npcs\.sleepy_coworker\.(speed|awareness)$/, // he shuffles at balance.sleepyCoworker.shuffleTilesPerSecond
+  /^abilities\.[^.]+\.description$/, // nothing in the game shows it (yet), so tuning it would change nothing
 ];
 
 function leaves(node: unknown, prefix = ''): [string, unknown][] {
@@ -64,6 +65,15 @@ describe('schema', () => {
       .filter((path) => !FIELD_BY_PATH.has(path) && !NOT_TUNABLE.some((re) => re.test(path)));
     // A fixture without a random range has no `range` key, so it can't be missing here.
     expect(missing).toEqual([]);
+  });
+
+  it("a slider narrower than its field's limits stays inside them and holds the shipped value", () => {
+    for (const f of FIELDS) {
+      if (f.kind.type !== 'number' || !f.kind.slider) continue;
+      const [lo, hi] = f.kind.slider;
+      const shipped = getPath(DEFAULTS, f.path) as number;
+      expect(lo >= f.kind.min && hi <= f.kind.max && lo < hi && shipped >= lo && shipped <= hi, f.path).toBe(true);
+    }
   });
 
   it('paths are unique and fields have labels', () => {
@@ -104,6 +114,13 @@ describe('schema', () => {
     expect(field.preview!(v)).toContain('2');
     expect(field.preview!(DEFAULTS)).toContain('3.2');
     for (const f of FIELDS) if (f.preview) expect(() => f.preview!(DEFAULTS), f.path).not.toThrow();
+  });
+
+  it("says what the shift clock will show, also when the end hour isn't after the start", () => {
+    const end = FIELD_BY_PATH.get('balance.shift.endHour')!;
+    expect(end.preview!(DEFAULTS)).toBe('the clock runs 7:00 AM to 3:00 PM');
+    expect(end.preview!(valuesWith({ balance: { shift: { startHour: 20, endHour: 24 } } }))).toBe('the clock runs 8:00 PM to 12:00 AM');
+    expect(end.preview!(valuesWith({ balance: { shift: { startHour: 20, endHour: 8 } } }))).toBe('ends before it starts, so the clock runs 8:00 PM to 9:00 PM');
   });
 });
 
@@ -189,15 +206,18 @@ describe('diffs and saves', () => {
       note: 'shorter shift',
       changes: ['Shift & Rules › The shift › Shift length (real time): 300 s → 240 s'],
       values: { balance: { shift: { lengthSeconds: 240 } } },
-      map: null,
+      // The built-in map as it was, so the version comes back on it after the built-in one changes.
+      map: builtInMap,
     });
+    expect(file.map).toBeNull();
     file = makeSave({ values: draft, map: 'BBBB\nB..B\nBBBB', note: '', previous: file, now: '2026-10-12T11:00:00Z', builtInMap });
     expect(file.revision).toBe(2);
     expect(file.map).toBe('BBBB\nB..B\nBBBB');
-    expect(file.history[0].changes).toEqual(['Map › edited']);
-    // Saving the built-in map stores nothing.
+    expect(file.history[0]).toMatchObject({ changes: ['Map › edited'], map: 'BBBB\nB..B\nBBBB' });
+    // Saving the built-in map stores nothing (but the history entry still says which map it was).
     file = makeSave({ values: draft, map: builtInMap, note: '', previous: file, now: '2026-10-12T12:00:00Z', builtInMap });
     expect(file.map).toBeNull();
+    expect(file.history[0]).toMatchObject({ changes: ['Map › back to the built-in school'], map: builtInMap });
     let many = file;
     for (let i = 0; i < HISTORY_LIMIT + 5; i++) many = makeSave({ values: draft, map: null, note: `${i}`, previous: many, now: '2026-10-12T12:00:00Z', builtInMap });
     expect(many.history).toHaveLength(HISTORY_LIMIT);

@@ -269,14 +269,18 @@ export class FieldView {
           box.addEventListener('change', commit);
           box.addEventListener('blur', commit);
         }
+        /** The boxes hold a range that was switched on here (else they follow the fixed yield). */
+        let hadRange = false;
         this.show = (value, force) => {
           const on = Array.isArray(value);
           if (toggle) {
             toggle.checked = on;
             low.disabled = high.disabled = !on;
           }
-          // Switched off, the boxes keep showing the last range (greyed out), ready for switching back on.
-          const pairValue = on ? (value as number[]) : low.value ? null : rangeStart(field, this.host.draft);
+          if (on) hadRange = true;
+          // Switched off, the boxes keep showing the last range (greyed out), ready for switching back
+          // on; with none yet, the fixed yield as it is now, which switching on starts from.
+          const pairValue = on ? (value as number[]) : hadRange ? null : rangeStart(field, this.host.draft);
           if (!pairValue) return;
           if (force || !typing(low)) low.value = toInput(pairValue[0]);
           if (force || !typing(high)) high.value = toInput(pairValue[1]);

@@ -12,9 +12,10 @@
 // pull: balance saved in Copper Studio on claude.ai lives in the published page. Before the code is
 // published again (which replaces that page), pull it into the repo: its values and history into
 // src/config/tuning.json, its map into src/assets/maps/lincoln.txt. Claude can fetch the published
-// page to a file (the Artifact tool's read); a tuning file exported from the Studio works too.
-// Refuses anything else, and balance that would lose the repo's: older than it, or saved apart from
-// it (on the dev server, say) rather than on top of it (unless --force).
+// page to a file (the Artifact tool's read); a saved version exported from the Studio works too
+// (Export with no unsaved changes), but an exported draft doesn't. Refuses anything else, and
+// balance that would lose the repo's: older than it, or saved apart from it (on the dev server, say)
+// rather than on top of it (unless --force).
 //
 // The functions are exported for the e2e suite, which builds the page in-process.
 
@@ -139,6 +140,12 @@ export function pullTuning(text, { parseTuning, stringifyTuning }, { repoTuning 
   }
   if (raw?.format !== 'copper-tuning') throw new Error('Its tuning file is not a Copper tuning file (its format should be "copper-tuning").');
   const { file, warnings } = parseTuning(json);
+  // Not even with --force: it would record a version that was never saved anywhere.
+  if (file.draftOf !== undefined) {
+    throw new Error(
+      `That is a draft exported from Copper Studio (unsaved changes on top of version ${file.draftOf}), not a saved version. Nothing was written. Import it in the Studio (⋯ › Import…) and Save to game, then pull that page.`,
+    );
+  }
   const loss = wouldLose(file, parseTuning(repoTuning).file);
   if (loss && !force) {
     throw new Error(`${loss} Nothing was written. Compare the two (git log src/config/tuning.json, and the page's history in Copper Studio), or add --force to replace the repo's balance with the page's.`);

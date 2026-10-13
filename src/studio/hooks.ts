@@ -10,7 +10,10 @@ export const ART_READY = 'copper:art-ready';
 /** game.registry flag: the Studio covers the game, so Boot doesn't open the menu underneath it. */
 export const STUDIO_OPEN = 'studio:covering';
 
-/** game.registry: where the HUD's windows are (game pixels), so the Studio's floating button keeps clear of them. */
+/**
+ * game.registry: where the HUD's windows are (game pixels; the menu and the end of a shift put the
+ * corner balance label here), so the Studio's floating button keeps clear of them.
+ */
 export const HUD_LAYOUT = 'hud:layout';
 
 export interface HudLayout {

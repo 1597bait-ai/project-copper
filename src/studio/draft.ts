@@ -3,7 +3,7 @@
 // all unit tested (draft.test.ts).
 
 import { FIELDS, FIELD_BY_PATH, SECTIONS, checkValue } from '../config/schema';
-import { checkOverrides, describeChanges, diffValues, getPath, setPath, valuesWith, type Json, type Overrides, type TuningFile, type Values } from '../config/tuning';
+import { TUNING_FORMAT, checkOverrides, describeChanges, diffValues, getPath, setPath, valuesWith, type Json, type Overrides, type TuningFile, type Values } from '../config/tuning';
 import { sameMap } from '../world/editing';
 import { readJson, readText, removeKey, writeJson, type KeyValue } from './storage';
 
@@ -108,6 +108,26 @@ export function changeLines(from: { values: Values; map: string | null }, to: { 
   const map = mapChangeLine(from.map, to.map, builtIn);
   if (map) lines.push(map);
   return lines;
+}
+
+/**
+ * The draft as a tuning file to keep or send (Export), marked as a draft of the saved version: only
+ * Save to game makes versions, so it gets no number or history entry of its own. Import reads it
+ * back; tools/artifact-page.mjs pull refuses it.
+ */
+export function exportedDraft(draft: Draft, saved: TuningFile, now: string): TuningFile {
+  return {
+    format: TUNING_FORMAT,
+    version: 1,
+    revision: saved.revision,
+    draftOf: saved.revision,
+    exportedAt: now,
+    savedAt: null,
+    note: draft.note,
+    values: checkOverrides(draft.values).values,
+    map: draft.map,
+    history: [],
+  };
 }
 
 // ---- a newer version saved since the draft started --------------------------------------

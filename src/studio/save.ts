@@ -28,6 +28,8 @@ export class SaveError extends Error {
   constructor(
     readonly code: SaveErrorCode,
     message: string,
+    /** No answer came, so the save may still have gone through (and the page may still reload to it). */
+    readonly uncertain = false,
   ) {
     super(message);
     this.name = 'SaveError';
@@ -71,7 +73,7 @@ const MSG = {
   tooLarge: (html: string) => `The game page is too big for claude.ai to publish (${megabytes(html)}). Nothing was saved; export the tuning file instead.`,
   rateLimited: 'claude.ai is getting too many saves from this game. Nothing was saved: wait a minute, then save again (one save can hold many changes).',
   refused: (message: string) => `claude.ai refused the new version of the page${detail(message)}. Nothing was saved.`,
-  failed: (message: string) => `claude.ai couldn't publish the new version${detail(message)}. Nothing was saved; try again in a minute.`,
+  failed: (message: string) => `claude.ai couldn't publish the new version${detail(message)}. Unless the page reloads by itself, nothing was saved: try again in a minute.`,
   publishTimeout: "claude.ai didn't confirm the save in time. If the page reloads by itself, it worked; if not, save again.",
   devGone: "The dev server didn't answer (is npm run dev still running?). Nothing was saved.",
   devConflict: (message: string) => `${message} Nothing was saved: reload the page to work on the latest version.`,
@@ -232,13 +234,14 @@ async function publish(artifact: ArtifactCapability, html: string): Promise<void
   for (let attempt = 0; ; attempt++) {
     try {
       // Not retried when it times out: the publish may still land (and reload the page).
-      await deadline(Promise.resolve().then(() => artifact.publish(html)), PUBLISH_MS, () => new SaveError('failed', MSG.publishTimeout));
+      await deadline(Promise.resolve().then(() => artifact.publish(html)), PUBLISH_MS, () => new SaveError('failed', MSG.publishTimeout, true));
       return;
     } catch (e) {
       if (e instanceof SaveError) throw e;
       const error = publishError(field(e, 'code'), field(e, 'message'), html);
       if (error) throw error;
-      if (attempt > 0) throw new SaveError('failed', MSG.failed(field(e, 'message')));
+      // A passing failure can come after the page was published (only the answer got lost).
+      if (attempt > 0) throw new SaveError('failed', MSG.failed(field(e, 'message')), true);
       await sleep(RETRY_PAUSE_MS[0] + Math.random() * (RETRY_PAUSE_MS[1] - RETRY_PAUSE_MS[0]));
     }
   }
@@ -309,7 +312,7 @@ async function writeRepo(file: TuningFile): Promise<{ reloads: boolean }> {
  * the viewer declines claude.ai's download).
  */
 export async function exportTuning(file: TuningFile): Promise<'downloaded' | 'copied' | 'shown'> {
-  const filename = `copper-tuning-v${file.revision}.json`;
+  const filename = file.draftOf === undefined ? `copper-tuning-v${file.revision}.json` : `copper-tuning-draft-from-v${file.draftOf}.json`;
   const data = stringifyTuning(file);
   if (claudeRuntime()) {
     // Inside claude.ai's viewer a page can't download by itself: claude.ai offers the file.

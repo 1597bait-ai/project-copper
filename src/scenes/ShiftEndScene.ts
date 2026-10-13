@@ -1,9 +1,13 @@
 import Phaser from 'phaser';
 import { BALANCE } from '../config/balance';
 import { CHARACTERS } from '../config/characters';
+import { NPCS } from '../config/npcs';
 import { saleValue } from '../systems/Bag';
+import { clockText } from '../systems/clock';
 import { loadSave, updateSave } from '../systems/save';
+import { isPlayTest } from '../ui/balanceLabel';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, Button, COLORS, drawBox, fitColumn, fitWidth, isPortrait, money, textStyle } from '../ui/theme';
+import { timesWord } from '../ui/words';
 import { GameScene, type ShiftSummary } from './GameScene';
 import { addBalanceLabel, addSchoolBackdrop } from './MenuScene';
 
@@ -25,6 +29,12 @@ export class ShiftEndScene extends Phaser.Scene {
     if (recorded.has(summary)) return;
     recorded.add(summary);
     const prevBest = loadSave().bestShift;
+    // A Copper Studio play test runs a draft balance: the player's own totals and best shift stay as they were.
+    if (isPlayTest()) {
+      this.best = prevBest;
+      this.newBest = false;
+      return;
+    }
     const save = updateSave((d) => {
       d.totalEarned = Math.round((d.totalEarned + summary.earned) * 100) / 100;
       d.shiftsWorked += 1;
@@ -50,8 +60,8 @@ export class ShiftEndScene extends Phaser.Scene {
       .text(cx, top + 56, headline, textStyle(portrait ? 112 : 128, s.fired ? COLORS.bad : COLORS.good, { fontStyle: '700', strokeThickness: 14, shadow: { offsetX: 8, offsetY: 8, color: COLORS.ink, blur: 0, stroke: true, fill: true } }))
       .setOrigin(0.5, 0);
     const sub = s.fired
-      ? 'Mr. Gravy caught you three times. Clean out your locker.'
-      : `${CHARACTERS[s.character]?.name ?? 'You'} clocked out at 3:00 PM.`;
+      ? `${NPCS.mr_gravy.name} caught you ${timesWord(s.warnings)}. Clean out your locker.`
+      : `${CHARACTERS[s.character]?.name ?? 'You'} clocked out at ${clockText(1)}.`;
     this.add.text(cx, top + (portrait ? 196 : 214), sub, textStyle(portrait ? 40 : 34, COLORS.text, { align: 'center', wordWrap: { width: 960 } })).setOrigin(0.5, 0);
 
     // The report, in a window.

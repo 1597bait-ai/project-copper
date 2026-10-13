@@ -73,13 +73,17 @@ function problemWith(tuning) {
   return null;
 }
 
+/** This machine's own addresses (IPv4, IPv6, and IPv4 written as IPv6). */
+const isLoopback = (address) => typeof address === 'string' && (address === '::1' || /^(::ffff:)?127\./.test(address));
+
 /**
  * Whether a POST comes from a page on this dev server. Browsers send Origin with every POST, so a
- * page on another site (which could otherwise post a form here) is turned away; tools send none.
+ * page on another site (which could otherwise post a form here) is turned away. A request without
+ * one is a tool's: taken from this machine only, since npm run dev serves the whole Wi-Fi.
  */
 function sameOrigin(req) {
   const origin = req.headers.origin;
-  if (origin === undefined) return true;
+  if (origin === undefined) return isLoopback(req.socket?.remoteAddress);
   try {
     const host = new URL(origin).host;
     return host === req.headers.host || host === req.headers['x-forwarded-host'];
@@ -119,10 +123,10 @@ function readBody(req, max) {
  * The dev server's /__copper/tuning endpoint (exported, with its file paths, for the unit test).
  * GET answers { tuning, map }: that it answers at all tells the Studio it can save here. POST
  * { tuning } checks the file and only then writes it: the map into `mapFile` (ending with a
- * newline), everything else into `tuningFile` with map null. A bad request writes nothing, and
- * neither does a save made from an older version than the repo's (409).
+ * newline), everything else into `tuningFile` with map null. A bad request writes nothing (a map
+ * the game can't play included), and neither does a save made from an older version than the repo's (409).
  */
-export function tuningEndpoint({ tuningFile, mapFile, loadTuning, maxBody = MAX_BODY }) {
+export function tuningEndpoint({ tuningFile, mapFile, loadTuning, loadMapRules, maxBody = MAX_BODY }) {
   async function save(req) {
     let text;
     try {
@@ -141,6 +145,12 @@ export function tuningEndpoint({ tuningFile, mapFile, loadTuning, maxBody = MAX_
     const { parseTuning, stringifyTuning } = await loadTuning();
     // Unknown values are dropped and numbers clamped, exactly as the game does when it loads the file.
     const { file, warnings } = parseTuning(JSON.stringify(request.tuning));
+    // The map becomes the built-in school of every build (and npm test checks it): only a playable one.
+    if (file.map !== null) {
+      const { parseMap, validateMap } = await loadMapRules();
+      const problems = validateMap(parseMap(file.map)).errors;
+      if (problems.length) return [400, { error: `The map can't be played: ${problems.slice(0, 3).join(' ')}` }];
+    }
     // Compare-and-set, like publishing on claude.ai: a save is one version on from the repo's, or it
     // was made from an older one (another tab saved, or a pull ran since the page loaded) and would
     // quietly undo those changes.
@@ -192,6 +202,7 @@ export function copperTuning({ tuningFile = TUNING_FILE, mapFile = MAP_FILE } = 
           mapFile,
           // The game's own rules, loaded through Vite so they are always the current code.
           loadTuning: () => server.ssrLoadModule('/src/config/tuning.ts'),
+          loadMapRules: async () => ({ ...(await server.ssrLoadModule('/src/world/mapText.ts')), ...(await server.ssrLoadModule('/src/world/validate.ts')) }),
         }),
       );
     },
