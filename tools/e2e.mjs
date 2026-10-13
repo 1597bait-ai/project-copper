@@ -1487,6 +1487,7 @@ if (runs('studio')) {
             min: Number(slider.min),
             max: Number(slider.max),
             from: Number(slider.value),
+            scrollTop: document.querySelector('.cs-main').scrollTop,
           };
         });
       const valuesBefore = JSON.stringify((await kit.snapshot()).draft.values);
@@ -1500,6 +1501,19 @@ if (runs('studio')) {
         { coarse, slider, top: await page.locator('.cs-main').evaluate((m) => m.scrollTop) },
       );
       // ...while dragging sideways along one moves it, from where it was (towards the roomier end).
+      // The swipe flings the page on: measure the slider once it has stopped, or the finger lands
+      // where the slider was a moment ago.
+      await page.waitForFunction(
+        () => {
+          const top = document.querySelector('.cs-main').scrollTop;
+          const now = performance.now();
+          const seen = (window.__e2eScroll ??= { top, since: now });
+          if (seen.top !== top) Object.assign(seen, { top, since: now });
+          return now - seen.since > 500;
+        },
+        null,
+        { timeout: 15000, polling: 100 },
+      );
       const across = await sliderAt();
       const way = across && across.from > (across.min + across.max) / 2 ? -1 : 1;
       if (across) await drag({ x: across.left + across.width * (way > 0 ? 0.3 : 0.7), y: across.y }, way * across.width * 0.25, 0);
@@ -1515,7 +1529,7 @@ if (runs('studio')) {
       check(
         'phone: dragging sideways along a slider moves it, from where it was',
         moved && typeof got === 'number' && Math.abs(got - want) <= step + 1e-9,
-        { across, got, want },
+        { across, got, want, scrollTopAfter: await page.locator('.cs-main').evaluate((m) => m.scrollTop) },
       );
       if (across) await kit.link(across.path, 'Undo');
 
