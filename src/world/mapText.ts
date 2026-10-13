@@ -312,6 +312,19 @@ export function legendComment(): string {
   return lines.join('\n');
 }
 
-export function serializeMap(rows: string[], names: ParsedMap['names'] = []): string {
-  return [legendComment(), '', ...names.map((n) => `@ ${n.x},${n.y} ${n.name}`), ...(names.length ? [''] : []), ...rows, ''].join('\n');
+/** A map's own notes: its `//` lines other than the legend that serializeMap writes at the top. */
+export function mapNotes(text: string): string[] {
+  const legend = new Set(legendComment().split('\n'));
+  return text
+    .replace(/^﻿/, '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('//') && !legend.has(line));
+}
+
+/** A map as text: the legend, the map's own `notes` (see mapNotes), the room names, then the grid. */
+export function serializeMap(rows: string[], names: ParsedMap['names'] = [], notes: readonly string[] = []): string {
+  const head = notes.length ? [legendComment(), '//', ...notes] : [legendComment()];
+  return [...head, '', ...names.map((n) => `@ ${n.x},${n.y} ${n.name}`), ...(names.length ? [''] : []), ...rows, ''].join('\n');
 }

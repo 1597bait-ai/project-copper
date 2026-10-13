@@ -13,7 +13,8 @@
 // published again (which replaces that page), pull it into the repo: its values and history into
 // src/config/tuning.json, its map into src/assets/maps/lincoln.txt. Claude can fetch the published
 // page to a file (the Artifact tool's read); a tuning file exported from the Studio works too.
-// Refuses anything else, and a page older than the repo's balance (unless --force).
+// Refuses anything else, and balance that would lose the repo's: older than it, or saved apart from
+// it (on the dev server, say) rather than on top of it (unless --force).
 //
 // The functions are exported for the e2e suite, which builds the page in-process.
 
@@ -96,11 +97,32 @@ export function buildArtifactPage(singleHtml, tuningText) {
   return content;
 }
 
+/** "saved 2026-10-12 19:00 UTC", or '' for a save without a time. */
+const savedOn = (iso) => (iso ? `saved ${iso.replace('T', ' ').replace(/:\d\d(\.\d+)?Z$/, ' UTC')}` : '');
+
+/**
+ * Why pulling `file` over the repo's balance (`repo`) would lose saves, or null. Fine when `file` is
+ * the repo's version or was saved on top of it: its history then holds the repo's last save. A file
+ * whose history no longer reaches back that far (it keeps the last 30) is taken on trust.
+ */
+function wouldLose(file, repo) {
+  if (repo.revision === 0) return null;
+  if (file.revision < repo.revision) {
+    return `The repo's balance (version ${repo.revision}) is newer than this page's (version ${file.revision}).`;
+  }
+  const mine = [file, ...file.history].find((save) => save.revision === repo.revision);
+  if (!mine || (mine.savedAt || '') === (repo.savedAt || '')) return null;
+  const repoSave = [`version ${repo.revision}`, savedOn(repo.savedAt)].filter(Boolean).join(', ');
+  const pageSave = savedOn(mine.savedAt) ? ` (${savedOn(mine.savedAt)})` : '';
+  return `The repo's balance (${repoSave}) and this page's were saved separately: the page's version ${repo.revision} is a different save${pageSave}, so pulling would lose the repo's.`;
+}
+
 /**
  * What `pull` writes into the repo from a page saved on claude.ai (or a tuning file exported from
  * the Studio): the tuning file with its map moved out (history kept) and the map, when there is one.
  * `tuning` is src/config/tuning.ts; `repoTuning` the repo's tuning file now. Throws for anything that
- * isn't a Copper page or tuning file, and for balance older than the repo's (unless `force`).
+ * isn't a Copper page or tuning file, and for balance that would lose the repo's saves: older, or
+ * saved separately (unless `force`).
  */
 export function pullTuning(text, { parseTuning, stringifyTuning }, { repoTuning = '', force = false } = {}) {
   let json = text.trim();
@@ -117,9 +139,9 @@ export function pullTuning(text, { parseTuning, stringifyTuning }, { repoTuning 
   }
   if (raw?.format !== 'copper-tuning') throw new Error('Its tuning file is not a Copper tuning file (its format should be "copper-tuning").');
   const { file, warnings } = parseTuning(json);
-  const repo = parseTuning(repoTuning).file;
-  if (repo.revision > file.revision && !force) {
-    throw new Error(`The repo's balance (version ${repo.revision}) is newer than this page's (version ${file.revision}), so nothing was written. Pull a newer page, or add --force to replace the repo's balance anyway.`);
+  const loss = wouldLose(file, parseTuning(repoTuning).file);
+  if (loss && !force) {
+    throw new Error(`${loss} Nothing was written. Compare the two (git log src/config/tuning.json, and the page's history in Copper Studio), or add --force to replace the repo's balance with the page's.`);
   }
   return { file, warnings, tuningText: stringifyTuning({ ...file, map: null }), mapText: file.map === null ? null : repoText(file.map) };
 }
@@ -149,10 +171,20 @@ async function build(args) {
   console.log('If balance was saved in the Studio on claude.ai since the last publish, pull that page first (node tools/artifact-page.mjs pull <page>): publishing replaces it.');
 }
 
-/** src/config/tuning.ts, loaded through Vite (it uses the bundler's import style, which Node can't load). */
+/**
+ * src/config/tuning.ts, loaded through Vite (it uses the bundler's import style, which Node can't
+ * load). It and its imports are plain TypeScript, so no project config, plugins or dependency scan.
+ */
 async function loadTuning() {
   const { createServer } = await import('vite');
-  const vite = await createServer({ root: ROOT, server: { middlewareMode: true, hmr: false, watch: null }, appType: 'custom', logLevel: 'silent' });
+  const vite = await createServer({
+    root: ROOT,
+    configFile: false,
+    server: { middlewareMode: true, hmr: false, watch: null },
+    optimizeDeps: { noDiscovery: true, include: [] },
+    appType: 'custom',
+    logLevel: 'silent',
+  });
   try {
     return await vite.ssrLoadModule('/src/config/tuning.ts');
   } finally {
@@ -171,7 +203,7 @@ async function pull(args) {
   await writeFile(at(FILES.tuning), pulled.tuningText);
   if (pulled.mapText !== null) await writeFile(at(FILES.map), pulled.mapText);
 
-  const saved = file.savedAt ? ` saved ${file.savedAt.replace('T', ' ').replace(/:\d\d(\.\d+)?Z$/, ' UTC')}` : '';
+  const saved = savedOn(file.savedAt) ? ` (${savedOn(file.savedAt)})` : '';
   console.log(`Pulled balance version ${file.revision}${saved}${file.note ? `: "${file.note}"` : ''}`);
   const latest = file.history[0]?.revision === file.revision ? file.history[0].changes : [];
   if (latest.length) {

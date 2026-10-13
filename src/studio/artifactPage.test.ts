@@ -97,10 +97,31 @@ describe('pulling balance saved on claude.ai', () => {
 
   it('will not go back to older balance than the repo has, unless forced', () => {
     const older = page(claudeSave(null)); // version 1
-    const repoTuning = stringifyTuning({ ...emptyTuning(), revision: 3 });
-    expect(() => pullTuning(older, tuning, { repoTuning })).toThrow(/newer than this page's/);
+    const repoTuning = stringifyTuning({ ...emptyTuning(), revision: 3, savedAt: '2026-10-12T12:00:00.000Z' });
+    expect(() => pullTuning(older, tuning, { repoTuning })).toThrow(/newer than this page's.*Nothing was written/s);
     expect(pullTuning(older, tuning, { repoTuning, force: true }).file.revision).toBe(1);
-    expect(pullTuning(older, tuning, { repoTuning: stringifyTuning({ ...emptyTuning(), revision: 1 }) }).file.revision).toBe(1);
+  });
+
+  it('pulls balance saved on top of the repo’s (or the very same version)', () => {
+    const repoSave = claudeSave(null); // version 1, published from the repo
+    const repoTuning = stringifyTuning(repoSave);
+    expect(pullTuning(page(repoSave), tuning, { repoTuning }).file).toEqual(repoSave);
+    const onTop = makeSave({ values: valuesWith({}), map: null, note: 'back to normal', previous: repoSave, now: '2026-10-12T11:00:00.000Z', builtInMap: BUILT_IN_MAP });
+    expect(pullTuning(page(onTop), tuning, { repoTuning }).file.revision).toBe(2);
+  });
+
+  it('will not lose balance the repo saved separately (on the dev server, say), unless forced', () => {
+    const devSave = makeSave({ values: valuesWith({ balance: { boss: { sprintFactor: 2 } } }), map: null, note: 'dev', previous: emptyTuning(), now: '2026-10-11T09:00:00.000Z', builtInMap: BUILT_IN_MAP });
+    const repoTuning = stringifyTuning(devSave);
+    const claudeV1 = claudeSave(null); // also version 1, but another save
+    expect(() => pullTuning(page(claudeV1), tuning, { repoTuning })).toThrow(/saved separately/);
+    const claudeV2 = makeSave({ values: valuesWith({}), map: null, note: 'later', previous: claudeV1, now: '2026-10-12T11:00:00.000Z', builtInMap: BUILT_IN_MAP });
+    expect(() => pullTuning(page(claudeV2), tuning, { repoTuning })).toThrow(/\(version 1, saved 2026-10-11 09:00 UTC\).*saved separately.*--force/s);
+    expect(pullTuning(page(claudeV2), tuning, { repoTuning, force: true }).file).toEqual(claudeV2);
+    // Past the 30 saves a page keeps, a newer page is taken on trust.
+    const repoV1 = stringifyTuning({ ...devSave, revision: 1 });
+    const longAfter = { ...claudeV2, revision: 40, history: claudeV2.history.map((h, i) => ({ ...h, revision: 40 - i })) };
+    expect(pullTuning(page(longAfter), tuning, { repoTuning: repoV1 }).file.revision).toBe(40);
   });
 
   it('refuses anything else', () => {

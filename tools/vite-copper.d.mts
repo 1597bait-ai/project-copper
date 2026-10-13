@@ -31,5 +31,8 @@ export interface TuningEndpointOptions {
   maxBody?: number;
 }
 
-/** The dev server's /__copper/tuning endpoint: GET { tuning, map }; POST { tuning } checks and writes the repo files. */
+/**
+ * The dev server's /__copper/tuning endpoint: GET { tuning, map }; POST { tuning } checks and writes
+ * the repo files (400/413/415 for a bad request, 409 for a save made from an older version than the repo's).
+ */
 export function tuningEndpoint(options: TuningEndpointOptions): (req: EndpointRequest, res: EndpointResponse) => void;

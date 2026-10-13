@@ -39,10 +39,12 @@ const CSS = `
 .cs-chip b { color: var(--text); font-weight: 700; }
 .cs-chip.is-dirty { border-color: var(--copper); background: rgba(232,145,74,.14); color: var(--copper-hi); }
 .cs-chip.is-dirty b { color: var(--copper-hi); }
+.cs-narrow { display: none; }
 .cs-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .cs-play { display: inline-flex; min-width: 0; }
 .cs-play select { border-radius: 8px 0 0 8px; border-right: 0; min-width: 0; }
 .cs-play .cs-btn { border-radius: 0 8px 8px 0; }
+.cs-saveset { display: flex; align-items: center; gap: 8px; }
 
 /* ---- buttons and inputs */
 .cs-btn { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 38px; padding: 0 14px;
@@ -110,6 +112,7 @@ const CSS = `
 .cs-more { width: 100%; min-height: 46px; justify-content: space-between; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: #191d26; color: var(--muted); padding: 0 18px; }
 .cs-more:hover:not(:disabled) { background: #20252f; border-color: var(--line); color: var(--text); }
 .cs-more .cs-dot { margin: 0 0 0 8px; }
+.cs-card-head + .cs-more { border-top: 0; }
 .cs-empty { padding: 28px 8px; color: var(--muted); text-align: center; }
 
 /* ---- one setting */
@@ -122,7 +125,10 @@ const CSS = `
 .cs-numbox { display: inline-flex; align-items: center; gap: 6px; }
 .cs .cs-num { width: 90px; text-align: right; font-variant-numeric: tabular-nums; }
 .cs-unit { color: var(--muted); font-size: 13px; white-space: nowrap; }
-.cs-slider { flex: 1 1 150px; min-width: 110px; height: 30px; margin: 0; accent-color: var(--copper); cursor: pointer; touch-action: pan-y; }
+.cs-track { flex: 1 1 150px; min-width: 110px; display: flex; align-items: center; min-height: 38px; touch-action: pan-y; cursor: pointer; }
+.cs-slider { width: 100%; height: 30px; margin: 0; accent-color: var(--copper); cursor: pointer; touch-action: pan-y; }
+/* Touch screens: the track follows sideways drags (fieldView.ts), so a swipe that scrolls the page never moves a slider. */
+@media (pointer: coarse) { .cs-slider { pointer-events: none; } .cs-track { min-height: 44px; } }
 .cs-range { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .cs-range .cs-num { width: 82px; }
 .cs-to { color: var(--muted); font-size: 13px; }
@@ -156,6 +162,7 @@ const CSS = `
 .cs.is-map > * { pointer-events: auto; }
 .cs.is-map > .cs-main { display: none; }
 .cs.is-map > .cs-maphost { display: block; pointer-events: none; }
+.cs-maphost.is-waiting { background: var(--bg); }
 
 /* ---- history */
 .cs-hist { padding: 14px 18px; border-top: 1px solid var(--line); }
@@ -208,11 +215,19 @@ const CSS = `
 @media (max-width: 760px) {
   .cs { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr); grid-template-areas: "head" "notes" "nav" "main"; font-size: 16px; }
   .cs-head { gap: 8px; padding: 8px 12px; }
-  .cs-logo { font-size: 19px; }
+  .cs-brand { gap: 6px 8px; }
+  .cs-logo { font-size: 19px; margin-right: 0; }
   .cs-chip { font-size: 12.5px; padding: 3px 8px; }
-  .cs-actions { width: 100%; flex-wrap: nowrap; }
-  .cs-play { flex: 1 1 auto; }
-  .cs-play select { flex: 1 1 auto; width: 0; }
+  .cs-wide { display: none; }
+  .cs-narrow { display: inline; }
+  /* One row on most phones; on the narrowest, Save and the menu wrap to a second one. */
+  .cs-actions { width: 100%; flex-wrap: wrap; gap: 6px; }
+  .cs-play { flex: 1 0 auto; }
+  .cs-play select { flex: 1 1 auto; width: 0; min-width: 104px; padding-right: 28px; background-position: right 9px center; }
+  .cs-saveset { flex: 1 0 auto; gap: 6px; }
+  .cs-saveset .is-primary { flex: 1 1 auto; }
+  .cs-head .cs-btn { padding: 0 11px; }
+  .cs-head .cs-btn.is-icon { padding: 0; }
   .cs-note { padding: 8px 12px; }
   .cs-nav { gap: 0; padding: 0; overflow: visible; border-right: 0; border-bottom: 1px solid var(--line); }
   .cs-tabs { order: 1; flex-direction: row; gap: 4px; padding: 6px 8px; overflow-x: auto; overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: none; }

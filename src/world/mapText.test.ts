@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseMap, serializeMap } from './mapText';
+import { legendComment, mapNotes, parseMap, serializeMap } from './mapText';
 import { DEFAULT_MAP } from './maps';
 import { inWallLine, validateMap } from './validate';
 
@@ -59,6 +59,18 @@ describe('map text format', () => {
     const again = parseMap(serializeMap(map.rows, map.names));
     expect(again.rows).toEqual(map.rows);
     expect(again.names).toEqual(map.names);
+  });
+
+  it("keeps the map's own notes, but not the legend it writes itself", () => {
+    expect(mapNotes(SMALL)).toEqual(['// a tiny test school']);
+    const text = serializeMap(map.rows, map.names, mapNotes(SMALL));
+    expect(text.startsWith(`${legendComment()}\n//\n// a tiny test school\n\n@ 2,2 Test Room\n`)).toBe(true);
+    // Written again (the editor saving the map it opened), nothing is lost or doubled.
+    expect(mapNotes(text)).toEqual(['// a tiny test school']);
+    expect(serializeMap(map.rows, map.names, mapNotes(text))).toBe(text);
+    // Windows line endings and a byte-order mark are fine.
+    expect(mapNotes(`﻿// one\r\n// two\r\nBBB\r\n`)).toEqual(['// one', '// two']);
+    expect(serializeMap(map.rows, map.names, [])).toBe(serializeMap(map.rows, map.names));
   });
 
   it('reports problems instead of crashing', () => {

@@ -32,6 +32,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run build
+      # The Copper Studio checks also play the game page as claude.ai publishes it (built from dist-single/).
+      - run: npm run build:single
       - run: npm run e2e
       - uses: actions/upload-artifact@v4
         if: always()

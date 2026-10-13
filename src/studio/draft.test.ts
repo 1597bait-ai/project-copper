@@ -6,20 +6,25 @@ import { DEFAULT_MAP } from '../world/maps';
 import {
   DRAFT_KEY,
   LEGACY_EDITOR_KEYS,
+  MAP_PATH,
   SESSION_KEY,
   SESSION_MAX_AGE_MS,
+  SESSION_RELOAD_MS,
   changeLines,
   changedPaths,
+  clearSession,
   countBySection,
   draftFrom,
   loadDraft,
   mapsDiffer,
   normalizeMap,
   parseStoredDraft,
+  rebaseDraft,
   stashSession,
   storeDraft,
   takeLegacyEditorMap,
   takeSession,
+  versionOf,
   withValue,
 } from './draft';
 import type { KeyValue } from './storage';
@@ -127,6 +132,68 @@ describe('the draft', () => {
   });
 });
 
+describe('a newer version saved since the draft started', () => {
+  const save = (previous: TuningFile, overrides: TuningFile['values'], map: string | null = null) =>
+    makeSave({ values: valuesWith(overrides), map, note: '', previous, now: '2026-10-12T12:00:00Z', builtInMap: BUILT_IN });
+  const v1 = save(emptyTuning(), { npcs: { mr_gravy: { speed: 1.5 } } });
+  const v2 = save(v1, { npcs: { mr_gravy: { speed: 1.25 } } });
+  /** The built-in school with a plant on the last hallway tile: a second, different map edit. */
+  const OTHER = (() => {
+    for (let y = built.height - 1; y >= 0; y--) {
+      const x = built.rows[y].lastIndexOf('.');
+      const r = x >= 0 ? paint(built.rows, x, y, '*') : null;
+      if (r?.changed) return serializeMap(r.rows, built.names);
+    }
+    throw new Error('no hallway tile');
+  })();
+
+  it("finds each version's values", () => {
+    expect(versionOf(v2, 2)).toEqual({ values: v2.values, map: null });
+    expect(versionOf(v2, 1)).toEqual({ values: { npcs: { mr_gravy: { speed: 1.5 } } }, map: null });
+    expect(versionOf(v2, 0)).toEqual({ values: {}, map: null });
+    expect(versionOf(v2, 7)).toBeNull();
+  });
+
+  it('moves a draft that was only looked at onto the newer version', () => {
+    const looked = draftFrom(emptyTuning(), BUILT_IN);
+    expect(rebaseDraft(looked, versionOf(v2, 0)!, v2, BUILT_IN)).toEqual({ draft: { ...looked, values: v2.values, baseRevision: 2 }, kept: [], clashes: [] });
+  });
+
+  it("keeps the draft's own edits on top of it", () => {
+    const mine = { ...withValue(draftFrom(v1, BUILT_IN), 'npcs.student.speed', 3), map: EDITED };
+    const r = rebaseDraft(mine, versionOf(v2, 1)!, v2, BUILT_IN);
+    expect(r.draft).toEqual({ ...mine, values: { npcs: { mr_gravy: { speed: 1.25 }, student: { speed: 3 } } }, baseRevision: 2 });
+    expect(r.kept).toEqual(['npcs.student.speed', MAP_PATH]);
+    expect(r.clashes).toEqual([]);
+  });
+
+  it("says when the newer version changed the same thing (the draft's value stays)", () => {
+    const mine = withValue(draftFrom(v1, BUILT_IN), 'npcs.mr_gravy.speed', 1.75);
+    const r = rebaseDraft(mine, versionOf(v2, 1)!, v2, BUILT_IN);
+    expect(getPath(valuesWith(r.draft.values), 'npcs.mr_gravy.speed')).toBe(1.75);
+    expect(r.clashes).toEqual(['npcs.mr_gravy.speed']);
+    // The same edit on both sides leaves nothing to keep.
+    const both = withValue(draftFrom(v1, BUILT_IN), 'npcs.mr_gravy.speed', 1.25);
+    expect(rebaseDraft(both, versionOf(v2, 1)!, v2, BUILT_IN)).toMatchObject({ kept: [], clashes: [] });
+  });
+
+  it('keeps an optional range switched off', () => {
+    const mine = withValue(draftFrom(v1, BUILT_IN), 'fixtures.desk.range', null);
+    expect(rebaseDraft(mine, versionOf(v2, 1)!, v2, BUILT_IN).draft.values).toEqual({ npcs: { mr_gravy: { speed: 1.25 } }, fixtures: { desk: { range: null } } });
+  });
+
+  it('says when both edited the map, also on the dev server (where a saved map becomes the built-in one)', () => {
+    const theirs = save(emptyTuning(), {}, OTHER);
+    const mine = { ...draftFrom(emptyTuning(), BUILT_IN), map: EDITED };
+    expect(rebaseDraft(mine, versionOf(theirs, 0)!, theirs, BUILT_IN)).toMatchObject({ draft: { map: EDITED }, kept: [MAP_PATH], clashes: [MAP_PATH] });
+    // The dev server wrote their map into the map file (the built-in one now): only the history tells.
+    const dev = { ...theirs, map: null };
+    expect(rebaseDraft(mine, versionOf(dev, 0)!, dev, OTHER)).toMatchObject({ kept: [MAP_PATH], clashes: [MAP_PATH] });
+    // An untouched map follows theirs.
+    expect(rebaseDraft(draftFrom(emptyTuning(), BUILT_IN), versionOf(theirs, 0)!, theirs, BUILT_IN).draft.map).toBe(OTHER);
+  });
+});
+
 describe('keeping the draft in the browser', () => {
   it('stores it and loads it back', () => {
     const { store, map } = memory();
@@ -155,12 +222,25 @@ describe('keeping the draft in the browser', () => {
 });
 
 describe('reopening after a save', () => {
-  it('reads the stash once', () => {
-    const { store } = memory();
+  it('uses the stash up, except for a second reload straight after the first', () => {
+    const { store, map } = memory();
     const session = { tab: 'gravy', crew: 'tomothy', saving: { revision: 4, target: 'dev' }, at: 1000 };
     expect(stashSession(store, session)).toBe(true);
     expect(takeSession(store, 2000)).toEqual({ ...session, conflict: false });
-    expect(takeSession(store, 2000)).toBeNull();
+    // The dev server reloads again after a map save: that load still reopens the Studio.
+    expect(takeSession(store, 2000 + SESSION_RELOAD_MS)).toEqual({ ...session, conflict: false });
+    // Any later reload doesn't.
+    expect(takeSession(store, 2001 + SESSION_RELOAD_MS)).toBeNull();
+    expect(map.size).toBe(0);
+    expect(takeSession(store, 2002 + SESSION_RELOAD_MS)).toBeNull();
+  });
+
+  it('is forgotten when the Studio closes', () => {
+    const { store } = memory();
+    stashSession(store, { tab: 'map', crew: 'dalton', at: 1000 });
+    expect(takeSession(store, 1500)).not.toBeNull();
+    clearSession(store);
+    expect(takeSession(store, 1600)).toBeNull();
   });
 
   it('ignores an old or broken stash', () => {

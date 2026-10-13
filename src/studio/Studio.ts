@@ -7,7 +7,7 @@
 
 import type Phaser from 'phaser';
 import { CHARACTERS, CHARACTER_ORDER } from '../config/characters';
-import { SECTIONS, type Field, type FieldGroup, type Section } from '../config/schema';
+import { FIELD_BY_PATH, SECTIONS, type Field, type FieldGroup, type Section } from '../config/schema';
 import { DEFAULTS, applyTuning, checkOverrides, getPath, makeSave, parseTuning, stringifyTuning, valuesWith, type Overrides, type TuningFile, type Values } from '../config/tuning';
 import type { EditorLink } from '../scenes/EditorScene';
 import { loadSave } from '../systems/save';
@@ -20,17 +20,20 @@ import { knownSaveEnv, saveEnv } from './access';
 import { confirmDialog, openDialog, type Dialog } from './dialogs';
 import { copyText, h, type Child } from './dom';
 import {
-  SESSION_KEY,
   changeLines,
   changedPaths,
+  clearSession,
   countBySection,
   draftFrom,
   loadDraft,
+  MAP_PATH,
   mapsDiffer,
   normalizeMap,
+  rebaseDraft,
   stashSession,
   storeDraft,
   takeLegacyEditorMap,
+  versionOf,
   withValue,
   type Draft,
   type StudioSession,
@@ -39,7 +42,7 @@ import { FieldView, type FieldHost } from './fieldView';
 import { searchFields } from './fields';
 import { SaveError, exportTuning, saveTuning, type SaveEnv } from './save';
 import { Stage } from './stage';
-import { localStore, removeKey, sessionStore } from './storage';
+import { localStore, sessionStore } from './storage';
 import { addStudioStyles } from './styles';
 
 const MAP_TAB = 'map';
@@ -193,6 +196,8 @@ export class Studio {
     this.state = 'closed';
     this.root.hidden = true;
     this.root.querySelectorAll('.cs-layer').forEach((l) => l.remove());
+    // A reload from now on is an ordinary one: back to the game, not the Studio.
+    clearSession(sessionStore());
     setPlayTestLabel(null);
     applyTuning(this.saved);
     this.stage.uncover();
@@ -274,21 +279,33 @@ export class Studio {
         notes.push(['saved', 'bad', `The save didn't arrive: the game is still on version ${rev}. Your draft is kept, so you can save again.`, []]);
       }
     }
-    // The draft started from an older version: someone saved since.
+    // The draft started from another version than the game runs now: someone saved since (in
+    // another tab, on another device), or this is an older copy of the game.
     const base = this.draft.baseRevision;
     const rev = this.saved.revision;
-    if (base !== rev) {
+    const startedFrom = base < rev ? versionOf(this.saved, base) : null;
+    const startOver = { label: `Start over from version ${rev}`, run: () => void this.discardDraft() };
+    if (startedFrom) {
+      // Onto the newer version, keeping only the draft's own edits (else saving would undo theirs).
+      const r = rebaseDraft(this.draft, startedFrom, this.saved, BUILT_IN);
+      this.draft = r.draft;
+      this.draftValues = valuesWith(this.draft.values);
+      if (r.kept.length) {
+        const lead = session?.conflict ? `Someone saved version ${rev} while you were working.` : `Version ${rev} was saved after this draft was started (from version ${base}).`;
+        const kept = r.kept.length === 1 ? 'Your edit is' : `Your ${r.kept.length} edits are`;
+        const n = r.clashes.length;
+        const clash = n ? ` Version ${rev} changed ${this.names(r.clashes)} too: yours ${n === 1 ? 'is' : 'are'} kept, so check ${n === 1 ? 'it' : 'them'}.` : '';
+        notes.push(['newer', n ? 'warn' : 'info', `${lead} ${kept} kept on top of it.${clash}`, [startOver]]);
+      }
+    } else if (base !== rev) {
       if (this.unsavedCount() === 0) this.draft = { ...this.draft, baseRevision: rev };
       else if (base < rev) {
-        const lead = session?.conflict ? `Someone saved version ${rev} while you were working.` : `Version ${rev} was saved after this draft was started (from version ${base}).`;
+        // That version has left the history, so the draft's own edits can't be told apart.
         notes.push([
           'newer',
           'warn',
-          `${lead} Your edits are kept; the ones marked unsaved differ from version ${rev}.`,
-          [
-            { label: `Start over from version ${rev}`, run: () => void this.discardDraft() },
-            { label: 'Keep my draft', run: () => this.acceptBase() },
-          ],
+          `Version ${rev} was saved after this draft was started (from version ${base}), so everything marked unsaved differs from version ${rev}, not just your edits.`,
+          [startOver, { label: 'Keep my draft', run: () => this.acceptBase() }],
         ]);
       } else {
         notes.push(['newer', 'warn', `This draft was started from version ${base}, but this copy of the game is on version ${rev}.`, [{ label: 'Keep my draft', run: () => this.acceptBase() }]]);
@@ -306,6 +323,16 @@ export class Studio {
     });
   }
 
+  /** "Mr. Gravy › Stats › Speed and the map" for field paths (and MAP_PATH), the first few of them. */
+  private names(paths: string[]): string {
+    const named = paths.map((p) => {
+      const f = FIELD_BY_PATH.get(p);
+      return p === MAP_PATH ? 'the map' : f ? `${f.where} › ${f.label}` : p;
+    });
+    const shown = named.length > 3 ? [...named.slice(0, 2), `${named.length - 2} more`] : named;
+    return shown.length > 1 ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}` : shown[0];
+  }
+
   private acceptBase(): void {
     this.draft = { ...this.draft, baseRevision: this.saved.revision };
     this.persistNow();
@@ -318,7 +345,13 @@ export class Studio {
     this.dirtyChip = h('span', { class: 'cs-chip', 'aria-live': 'polite' });
     this.crewSelect = h('select', { 'aria-label': 'Crew member for the play test', title: 'Who plays the play test' });
     this.crewSelect.addEventListener('change', () => (this.crew = this.crewSelect.value));
-    const play = h('button', { class: 'cs-btn', type: 'button', title: 'Play a shift with the draft (nothing is saved)', onClick: () => this.playTest() }, '▶ Play test');
+    // "▶ Play" on phones, where the header has room for little more than the buttons.
+    const play = h(
+      'button',
+      { class: 'cs-btn', type: 'button', 'aria-label': 'Play test', title: 'Play a shift with the draft (nothing is saved)', onClick: () => this.playTest() },
+      '▶ Play',
+      h('span', { class: 'cs-wide' }, ' test'),
+    );
     this.saveButton = h('button', { class: 'cs-btn is-primary', type: 'button', onClick: () => this.openSave() }, 'Save to game');
     this.moreButton = h('button', { class: 'cs-btn is-icon', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', 'aria-label': 'More', title: 'More', onClick: () => this.toggleMenu() }, '⋯');
     const item = (label: string, hint: string, run: () => void, danger = false) =>
@@ -353,7 +386,8 @@ export class Studio {
       'header',
       { class: 'cs-head' },
       h('div', { class: 'cs-brand' }, h('span', { class: 'cs-logo' }, 'COPPER STUDIO'), this.versionChip, this.dirtyChip),
-      h('div', { class: 'cs-actions' }, h('div', { class: 'cs-play' }, this.crewSelect, play), this.saveButton, this.menuWrap),
+      // Save and the menu stay together: on the narrowest phones they wrap to a row of their own.
+      h('div', { class: 'cs-actions' }, h('div', { class: 'cs-play' }, this.crewSelect, play), h('div', { class: 'cs-saveset' }, this.saveButton, this.menuWrap)),
     );
 
     this.search = h('input', { type: 'search', class: 'cs-search', placeholder: 'Search settings…', 'aria-label': 'Search settings', autocomplete: 'off', spellcheck: 'false', enterkeyhint: 'search' });
@@ -497,10 +531,18 @@ export class Studio {
     const mapChanged = this.mapChanged();
     const count = paths.length + (mapChanged ? 1 : 0);
     const rev = this.saved.revision;
-    this.versionChip.replaceChildren('Live ', h('b', null, `v${rev}`), ` · ${rev ? shortDate(this.saved.savedAt) || 'saved' : 'shipped values'}`);
+    // Phones show the short forms ("v0 · shipped", "2 unsaved"): .cs-wide parts hide there.
+    const wide = (text: string) => h('span', { class: 'cs-wide' }, text);
+    this.versionChip.replaceChildren(wide('Live '), h('b', null, `v${rev}`), ' · ', rev ? shortDate(this.saved.savedAt) || 'saved' : h('span', null, 'shipped', wide(' values')));
     this.versionChip.title = rev ? `The version the game runs now${this.saved.note ? `: “${this.saved.note}”` : ''}` : 'The game runs the values its code ships with';
+    this.versionChip.dataset.revision = String(rev);
     this.dirtyChip.classList.toggle('is-dirty', count > 0);
-    this.dirtyChip.replaceChildren(...(count ? [h('b', null, String(count)), ` unsaved change${count === 1 ? '' : 's'}`] : ['No unsaved changes']));
+    this.dirtyChip.dataset.unsaved = String(count);
+    this.dirtyChip.replaceChildren(
+      ...(count
+        ? [h('b', null, String(count)), ' unsaved', wide(` change${count === 1 ? '' : 's'}`)]
+        : [wide('No unsaved changes'), h('span', { class: 'cs-narrow' }, 'All saved')]),
+    );
 
     const bySection = countBySection(paths);
     for (const [id, { count: badge }] of this.tabs) {
@@ -557,12 +599,16 @@ export class Studio {
 
   private showMap(): void {
     const label = this.mapHost.querySelector('p');
-    if (label) label.textContent = this.stage.artReady ? '' : 'Drawing the school…';
+    const ready = this.stage.artReady;
+    if (label) label.textContent = ready ? '' : 'Drawing the school…';
+    // Until the art is drawn the canvas still shows the game's own loading screen: cover it.
+    this.mapHost.classList.toggle('is-waiting', !ready);
     // After layout, so the canvas lands exactly on the page area.
     requestAnimationFrame(() =>
       this.stage.whenArtReady(() => {
         if (this.state !== 'open' || !this.onMapTab) return;
         if (label) label.textContent = '';
+        this.mapHost.classList.remove('is-waiting');
         this.stage.showEditor(this.mapHost, () => this.editorLink());
       }),
     );
@@ -597,7 +643,8 @@ export class Studio {
     if (basic.length) card.append(this.fieldList(basic));
     if (advanced.length) {
       const list = this.fieldList(advanced);
-      const open = this.moreOpen.has(group.id) || !basic.length;
+      // Closed until opened, even in a group of only rarely needed settings (its title and help still show).
+      const open = this.moreOpen.has(group.id);
       list.hidden = !open;
       const button = h('button', { class: 'cs-btn cs-more', type: 'button', 'aria-expanded': String(open) });
       const more = { button, list, group, fields: advanced };
@@ -730,6 +777,17 @@ export class Studio {
     setTimeout(() => t.remove(), ms);
   }
 
+  /** A dialog over the Studio. Toasts still showing go: on a phone they'd sit on its buttons. */
+  private dialog(opts: Parameters<typeof openDialog>[1]): Dialog {
+    this.toasts.replaceChildren();
+    return openDialog(this.root, opts);
+  }
+
+  private ask(...args: Parameters<typeof confirmDialog> extends [HTMLElement, ...infer Rest] ? Rest : never): Promise<boolean> {
+    this.toasts.replaceChildren();
+    return confirmDialog(this.root, ...args);
+  }
+
   // ---- the More menu ----------------------------------------------------------------------------
 
   private toggleMenu(open = this.menu.hidden): void {
@@ -803,7 +861,7 @@ export class Studio {
         : null,
       status,
     ];
-    const dialog: Dialog = openDialog(this.root, {
+    const dialog: Dialog = this.dialog({
       title: `Save to game — version ${revision}`,
       body,
       actions: [
@@ -822,28 +880,30 @@ export class Studio {
     const session: StudioSession = { tab: this.tab, crew: this.crew, saving: { revision: file.revision, target: env.target }, at: Date.now() };
     stashSession(sessionStore(), session);
     status.replaceChildren(h('div', { class: 'cs-box' }, `Saving version ${file.revision}…`));
-    const reloadSoon = (text: string, kind: 'good' | 'bad') => {
+    /** The page reloads to the latest version: claude.ai does it, on the dev server we do. Never resolves. */
+    const reloading = (text: string, kind: 'good' | 'bad') => {
       status.replaceChildren(h('div', { class: `cs-box is-${kind}` }, text));
-      if (env.target === 'dev' && kind === 'good') location.reload();
-      // The host reloads the page; offer a way on if it doesn't.
+      if (env.target === 'dev') location.reload();
+      // Offer a way on if the reload doesn't come.
       setTimeout(() => status.append(h('p', null, 'Still here? ', h('button', { class: 'cs-link', type: 'button', onClick: () => location.reload() }, 'Reload now'))), 8000);
       return new Promise<boolean>(() => {});
     };
     try {
       const result = await saveTuning(file, env);
-      if (result.reloads) return reloadSoon(`Saved as version ${file.revision}. Reloading…`, 'good');
+      if (result.reloads) return reloading(`Saved as version ${file.revision}. Reloading…`, 'good');
       // Saved without a reload: this page now runs the new version.
-      removeKey(sessionStore(), SESSION_KEY);
+      clearSession(sessionStore());
       this.adoptSaved(file);
       this.toast(`Saved as version ${file.revision}.`, 'good');
       return true;
     } catch (e) {
       const err = e instanceof SaveError ? e : new SaveError('failed', e instanceof Error ? e.message : String(e));
       if (err.code === 'conflict') {
+        // A newer version was saved first: reload to it, keeping the draft (it is in localStorage).
         stashSession(sessionStore(), { ...session, saving: undefined, conflict: true });
-        return reloadSoon(saveErrorText(err), 'bad');
+        return reloading(saveErrorText(err), 'bad');
       }
-      removeKey(sessionStore(), SESSION_KEY);
+      clearSession(sessionStore());
       status.replaceChildren(h('div', { class: 'cs-box is-bad' }, saveErrorText(err)));
       dialog.buttons[1]?.focus();
       return false;
@@ -884,9 +944,13 @@ export class Studio {
   private showExport(text: string): void {
     const area = h('textarea', { class: 'cs-code', readonly: true, spellcheck: 'false', 'aria-label': 'Tuning file', rows: 12 });
     area.value = text;
-    area.addEventListener('focus', () => area.select());
+    area.addEventListener('focus', () => {
+      area.select();
+      // Selecting scrolls to the end; the start of the file is the part worth seeing.
+      requestAnimationFrame(() => (area.scrollTop = 0));
+    });
     const hint = h('p', null, 'Copy this text to keep it, or send it to whoever looks after the game. Import loads it back into a draft.');
-    openDialog(this.root, {
+    this.dialog({
       title: 'Export the draft',
       body: [hint, area],
       actions: [
@@ -910,7 +974,7 @@ export class Studio {
     const picker = h('input', { type: 'file', accept: '.json,application/json,text/plain' });
     const report = h('div');
     let parsed: TuningFile | null = null;
-    const dialog = openDialog(this.root, {
+    const dialog = this.dialog({
       title: 'Import a tuning file',
       body: [
         h('p', null, 'Paste a tuning file (from Export, or a copy of src/config/tuning.json). It replaces the draft’s values and map; nothing reaches the game until you Save to game.'),
@@ -984,15 +1048,14 @@ export class Studio {
   private async loadVersion(label: string, values: Overrides, map: string | null): Promise<void> {
     const n = this.unsavedCount();
     if (n > 0) {
-      const ok = await confirmDialog(this.root, `Load ${label}?`, [h('p', null, `The draft’s values and map become ${label}’s, replacing your ${plural(n, 'unsaved change')}.`)], 'Load into draft');
+      const ok = await this.ask(`Load ${label}?`, [h('p', null, `The draft’s values and map become ${label}’s, replacing your ${plural(n, 'unsaved change')}.`)], 'Load into draft');
       if (!ok) return;
     }
     this.replaceDraft({ ...this.draft, values: checkOverrides(values).values, map: normalizeMap(map, BUILT_IN) }, `Loaded ${label} into the draft. Save to game makes it live.`);
   }
 
   private async resetAll(): Promise<void> {
-    const ok = await confirmDialog(
-      this.root,
+    const ok = await this.ask(
       'Reset everything?',
       [h('p', null, 'Every value and the map go back to what the game ships with. Only the draft changes: the game keeps its saved version until you Save to game.')],
       'Reset everything',
@@ -1005,7 +1068,7 @@ export class Studio {
     const n = this.unsavedCount();
     const rev = this.saved.revision;
     if (n > 0) {
-      const ok = await confirmDialog(this.root, 'Discard the draft?', [h('p', null, `Your ${plural(n, 'unsaved change')} will be thrown away, and the draft goes back to version ${rev}, the one the game runs now.`)], 'Discard draft', 'danger');
+      const ok = await this.ask('Discard the draft?', [h('p', null, `Your ${plural(n, 'unsaved change')} will be thrown away, and the draft goes back to version ${rev}, the one the game runs now.`)], 'Discard draft', 'danger');
       if (!ok) return;
     }
     this.replaceDraft(draftFrom(this.saved, BUILT_IN), `The draft is back to version ${rev}.`);

@@ -91,6 +91,15 @@ export function sliderRange(field: Field): { min: string; max: string; step: str
   return { min: toInput(k.min, s), max: toInput(k.max, s), step: toInput(stepOf(k), s) };
 }
 
+/**
+ * Where a slider goes after a sideways drag of `dx` pixels along a track `width` pixels wide: it
+ * moves with the finger from where it was, and never jumps to where the finger landed.
+ */
+export function dragSlider(from: number, dx: number, width: number, min: number, max: number): number {
+  if (!(width > 0) || !Number.isFinite(dx) || !Number.isFinite(from)) return from;
+  return Math.min(max, Math.max(min, from + (dx / width) * (max - min)));
+}
+
 /** "0.5 to 8, in steps of 0.25" for tooltips. */
 export function limitsText(field: Field): string {
   const k = field.kind;

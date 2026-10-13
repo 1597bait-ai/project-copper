@@ -11,7 +11,7 @@ import { COLORS, cssPerGamePixel, isPortrait, isTouchDevice, textStyle } from '.
 import { ERASER, EditHistory, ROUTE_STOP, VAN, describeCell, isBlockTool, isDragTool, lineCells, paint, reconcileNames, vanRect } from '../world/editing';
 import { TILESET_MARGIN, TILESET_SPACING, TILESET_TEXTURE, TILE_FRAMES, frameName, iconFrame, tileLayers } from '../world/autotile';
 import { DECOR_CHARS, FIXTURE_CHARS, OBJECT_BY_CHAR, TILES } from '../world/legend';
-import { parseMap, serializeMap, type ParsedMap, type TilePoint } from '../world/mapText';
+import { mapNotes, parseMap, serializeMap, type ParsedMap, type TilePoint } from '../world/mapText';
 import { DEFAULT_MAP, currentMapText } from '../world/maps';
 import { validateMap, type MapReport } from '../world/validate';
 import { decorKey, fixtureMount, standOnFloor, vanKey } from '../world/World';
@@ -62,6 +62,8 @@ type Icon = Phaser.GameObjects.Image | Phaser.GameObjects.Graphics | Phaser.Game
 interface Snapshot {
   rows: string[];
   names: ParsedMap['names'];
+  /** The map's own // notes, kept as they were (see mapNotes). */
+  notes: string[];
 }
 
 const TILE_LABELS: Record<string, string> = {
@@ -243,6 +245,8 @@ export class EditorScene extends Phaser.Scene {
   // ---- map state
   private rows: string[] = [];
   private names: ParsedMap['names'] = [];
+  /** The map's own notes: written back with it, so saving the map into its file keeps them. */
+  private notes: string[] = [];
   private parsed!: ParsedMap;
   private report: MapReport = { errors: [], warnings: [] };
   private history = new EditHistory<Snapshot>(100);
@@ -388,9 +392,11 @@ export class EditorScene extends Phaser.Scene {
     this.held.clear();
     this.overlay = null;
 
-    let map = parseMap(this.link.map);
-    if (map.width < 1 || map.height < 1) map = parseMap(DEFAULT_MAP.text);
+    let text = this.link.map;
+    let map = parseMap(text);
+    if (map.width < 1 || map.height < 1) map = parseMap((text = DEFAULT_MAP.text));
     this.rows = map.rows;
+    this.notes = mapNotes(text);
     // Room names that don't point at a room can't be fixed in the editor, so they go.
     const names = reconcileNames(map.rows, map.rows, map.names);
     this.names = names.names;
@@ -505,11 +511,11 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private snapshot(): Snapshot {
-    return { rows: this.rows, names: this.names };
+    return { rows: this.rows, names: this.names, notes: this.notes };
   }
 
   private mapText(): string {
-    return serializeMap(this.rows, this.names);
+    return serializeMap(this.rows, this.names, this.notes);
   }
 
   /** The map changed: redraw next frame, re-check problems, and tell the Studio once painting pauses. */
@@ -533,9 +539,10 @@ export class EditorScene extends Phaser.Scene {
     this.disarmReset();
     const map = parseMap(text);
     if (map.width < 1 || map.height < 1) return;
-    if (serializeMap(map.rows, map.names) === this.mapText()) return;
+    const notes = mapNotes(text);
+    if (serializeMap(map.rows, map.names, notes) === this.mapText()) return;
     const sizeChanged = map.width !== this.parsed.width || map.height !== this.parsed.height;
-    this.commit(map.rows, reconcileNames(map.rows, map.rows, map.names).names);
+    this.commit(map.rows, reconcileNames(map.rows, map.rows, map.names).names, notes);
     // The Studio already has this map.
     this.unsent = false;
     if (sizeChanged) this.fitView();
@@ -568,10 +575,11 @@ export class EditorScene extends Phaser.Scene {
   }
 
   /** One undoable action that replaces the whole map. Shown right away (strokes redraw once per frame). */
-  private commit(rows: string[], names = this.names) {
+  private commit(rows: string[], names = this.names, notes = this.notes) {
     this.history.record(this.snapshot());
     this.rows = rows;
     this.names = names;
+    this.notes = notes;
     this.changed();
     this.refresh();
   }
@@ -579,6 +587,7 @@ export class EditorScene extends Phaser.Scene {
   private restore(s: Snapshot) {
     this.rows = s.rows;
     this.names = s.names;
+    this.notes = s.notes;
     this.changed();
     this.refresh();
   }
@@ -1599,7 +1608,7 @@ export class EditorScene extends Phaser.Scene {
     this.finishStroke();
     const map = parseMap(DEFAULT_MAP.text);
     const sizeChanged = map.width !== this.parsed.width || map.height !== this.parsed.height;
-    this.commit(map.rows, map.names);
+    this.commit(map.rows, map.names, mapNotes(DEFAULT_MAP.text));
     if (sizeChanged) this.fitView();
     this.toast('Back to the built-in school. UNDO brings your map back.');
   }

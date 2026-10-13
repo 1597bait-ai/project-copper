@@ -398,6 +398,11 @@ describe('saving on the dev server', () => {
     await expect(save.saveTuning(savedFile(), env)).rejects.toMatchObject({ code: 'too_large' });
     vi.stubGlobal(
       'fetch',
+      vi.fn(async () => json({ error: 'The project’s balance is at version 3 now, and this save was made from version 0.' }, 409)),
+    );
+    await expect(save.saveTuning(savedFile(), env)).rejects.toMatchObject({ code: 'conflict', message: expect.stringMatching(/version 3 now.*reload the page/s) });
+    vi.stubGlobal(
+      'fetch',
       vi.fn(async () => {
         throw new TypeError('Failed to fetch');
       }),

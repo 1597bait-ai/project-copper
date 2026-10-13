@@ -3,6 +3,7 @@ import { FIELD_BY_PATH, FIELDS } from '../config/schema';
 import { DEFAULTS, valuesWith } from '../config/tuning';
 import {
   choiceIndex,
+  dragSlider,
   inputScale,
   limitsText,
   linesToText,
@@ -77,6 +78,16 @@ describe('numbers', () => {
     expect(sliderRange(warnings).step).toBe('1');
     expect(readNumber(warnings, '2.4').value).toBe(2);
     expect(limitsText(warnings)).toBe('1 to 10, in steps of 1');
+  });
+
+  it('moves a dragged slider with the finger, never to where it landed', () => {
+    // A track 200 px wide for 0–1000: 20 px sideways is 100 more, wherever the drag started.
+    expect(dragSlider(10, 20, 200, 0, 1000)).toBe(110);
+    expect(dragSlider(10, 0, 200, 0, 1000)).toBe(10);
+    expect(dragSlider(10, -50, 200, 0, 1000)).toBe(0);
+    expect(dragSlider(990, 50, 200, 0, 1000)).toBe(1000);
+    // A track with no size yet (hidden) leaves it alone.
+    expect(dragSlider(10, 20, 0, 0, 1000)).toBe(10);
   });
 });
 

@@ -18,7 +18,8 @@ export interface Pulled {
 
 /**
  * What `pull` writes into the repo from a page saved on claude.ai (or an exported tuning file).
- * Throws for anything else, and when `repoTuning` (the repo's tuning file now) is newer, unless `force`.
+ * Throws for anything else, and when it would lose saves in `repoTuning` (the repo's tuning file now):
+ * the repo's balance is newer, or was saved separately (not in the page's history). `force` skips that check.
  */
 export function pullTuning(
   text: string,

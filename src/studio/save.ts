@@ -74,6 +74,7 @@ const MSG = {
   failed: (message: string) => `claude.ai couldn't publish the new version${detail(message)}. Nothing was saved; try again in a minute.`,
   publishTimeout: "claude.ai didn't confirm the save in time. If the page reloads by itself, it worked; if not, save again.",
   devGone: "The dev server didn't answer (is npm run dev still running?). Nothing was saved.",
+  devConflict: (message: string) => `${message} Nothing was saved: reload the page to work on the latest version.`,
   devRefused: (message: string) => `The dev server didn't save the tuning file: ${message}`,
 };
 
@@ -198,10 +199,12 @@ async function devServerAnswers(ms: number): Promise<boolean> {
 
 /**
  * Saves a tuning file (its `map` included). Artifact: republishes the page and resolves
- * `{ reloads: true }` (this view reloads to the new version shortly after: stash anything that must
- * survive in sessionStorage BEFORE calling). Dev: writes the repo files and resolves
- * `{ reloads: true }` too (the dev server reloads the page). Rejects with {@link SaveError}.
- * `env.canSave` is advice for the UI: claude.ai or the dev server has the last word.
+ * `{ reloads: true }` (claude.ai reloads this view to the new version shortly after: stash anything
+ * that must survive in sessionStorage BEFORE calling). Dev: writes the repo files and resolves
+ * `{ reloads: true }` too, but the CALLER reloads the page (the dev server only does for a map change).
+ * Rejects with {@link SaveError}; `conflict` means a newer version was saved first (claude.ai is then
+ * already reloading this view; on the dev server the caller reloads). `env.canSave` is advice for
+ * the UI: claude.ai or the dev server has the last word.
  */
 export async function saveTuning(file: TuningFile, env: SaveEnv): Promise<{ reloads: boolean }> {
   if (env.target === 'artifact') return publishPage(file);
@@ -289,6 +292,8 @@ async function writeRepo(file: TuningFile): Promise<{ reloads: boolean }> {
   }
   if (!res.ok) {
     const message = typeof body?.error === 'string' && body.error ? body.error : `HTTP ${res.status}`;
+    // Like claude.ai, the endpoint only takes a save made from the version the repo has now.
+    if (res.status === 409) throw new SaveError('conflict', MSG.devConflict(message));
     throw new SaveError(res.status === 413 ? 'too_large' : 'failed', MSG.devRefused(message));
   }
   // Values the game's rules had to clamp or drop (the Studio normally never sends any).

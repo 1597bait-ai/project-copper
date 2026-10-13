@@ -6,6 +6,7 @@ import { getPath, type Values } from '../config/tuning';
 import { h } from './dom';
 import {
   choiceIndex,
+  dragSlider,
   inputScale,
   limitsText,
   linesToText,
@@ -32,6 +33,42 @@ export interface FieldHost {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 let ids = 0;
+
+/** How far a finger moves sideways before a slider follows it (less is a tap, or a scroll starting). */
+const DRAG_START_PX = 6;
+
+/**
+ * Touch screens: a native slider jumps to wherever a finger lands, so scrolling the page past one
+ * would change its value. There the slider ignores touches (see styles.ts) and its track follows
+ * sideways drags only; a swipe up or down scrolls the page as usual. A mouse uses the slider itself.
+ */
+function followSidewaysDrags(track: HTMLElement, slider: HTMLInputElement, onValue: (v: number) => void): void {
+  let drag: { id: number; x: number; y: number; from: number; on: boolean } | null = null;
+  track.addEventListener('pointerdown', (e) => {
+    // On the slider itself: it takes pointers here, and handles them natively.
+    if (e.target !== track || slider.disabled || !e.isPrimary) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, from: Number(slider.value), on: false };
+  });
+  track.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x;
+    if (!drag.on) {
+      if (Math.abs(dx) < DRAG_START_PX || Math.abs(dx) < Math.abs(e.clientY - drag.y)) return;
+      drag.on = true;
+      try {
+        track.setPointerCapture(e.pointerId);
+      } catch {
+        // The pointer is already gone: this move is the last one anyway.
+      }
+    }
+    onValue(dragSlider(drag.from, dx, slider.getBoundingClientRect().width, Number(slider.min), Number(slider.max)));
+  });
+  const end = (e: PointerEvent) => {
+    if (drag?.id === e.pointerId) drag = null;
+  };
+  // pointercancel: the browser took the swipe for a scroll.
+  for (const type of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) track.addEventListener(type, end);
+}
 
 export class FieldView {
   readonly root: HTMLElement;
@@ -153,7 +190,8 @@ export class FieldView {
         const input = textInput('cs-num', { inputmode: 'decimal', title: limitsText(field) });
         const range = sliderRange(field);
         const slider = h('input', { class: 'cs-slider', type: 'range', min: range.min, max: range.max, step: range.step, tabindex: -1, 'aria-label': `${field.label} (slider)` });
-        this.control.append(h('span', { class: 'cs-numbox' }, before ? h('span', { class: 'cs-unit' }, before) : null, input, after ? h('span', { class: 'cs-unit' }, after) : null), slider);
+        const track = h('span', { class: 'cs-track' }, slider);
+        this.control.append(h('span', { class: 'cs-numbox' }, before ? h('span', { class: 'cs-unit' }, before) : null, input, after ? h('span', { class: 'cs-unit' }, after) : null), track);
         const step = Number(range.step) / scale;
         input.addEventListener('input', () => {
           const r = readNumber(field, input.value);
@@ -177,13 +215,17 @@ export class FieldView {
         // Leaving the box shows the value actually used (the clamp note stays until the next edit).
         input.addEventListener('change', () => this.show(this.value, true));
         input.addEventListener('blur', () => this.show(this.value, true));
-        slider.addEventListener('input', () => {
-          const r = checkValue(field, Number(slider.value) / scale);
-          if (!r.ok) return;
+        // `raw` is in the slider's units (percent fields: 0–100).
+        const fromSlider = (raw: number) => {
+          const r = checkValue(field, raw / scale);
+          if (!r.ok || typeof r.value !== 'number') return;
           this.say(null);
           this.put(r.value);
-          input.value = toInput(r.value as number, scale);
-        });
+          input.value = toInput(r.value, scale);
+          slider.value = toInput(r.value, scale);
+        };
+        slider.addEventListener('input', () => fromSlider(Number(slider.value)));
+        followSidewaysDrags(track, slider, fromSlider);
         this.show = (value, force) => {
           if (typeof value !== 'number') return;
           if (force || !typing(input)) input.value = toInput(value, scale);

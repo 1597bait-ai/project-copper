@@ -129,6 +129,30 @@ describe('the dev server save endpoint', () => {
     expect(read()).toEqual({ tuning: REPO_TUNING, map: REPO_MAP });
   });
 
+  it('only takes a save made from the version the repo has now, like claude.ai', async () => {
+    const first = studioSave(null); // version 1, made from version 0
+    expect((await post(first)).status).toBe(200);
+    const afterFirst = read();
+    // Another tab still on version 0 saves its own version 1: it would undo the first save.
+    const stale = makeSave({ values: valuesWith({ npcs: { mr_gravy: { speed: 1 } } }), map: '#####\n#P..V#\n#####', note: 'from a stale tab', previous: emptyTuning(), now: '2026-10-12T10:05:00.000Z', builtInMap: REPO_MAP });
+    const refused = await post(stale);
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toMatch(/version 1 now.*made from version 0/);
+    expect(read()).toEqual(afterFirst);
+    // Made from version 1 (after a reload), it goes through.
+    const next = makeSave({ values: valuesWith({ npcs: { mr_gravy: { speed: 1 } } }), map: null, note: 'slower boss', previous: first, now: '2026-10-12T10:06:00.000Z', builtInMap: REPO_MAP });
+    expect((await post(next)).status).toBe(200);
+    expect(parseTuning(read().tuning).file).toMatchObject({ revision: 2, note: 'slower boss' });
+  });
+
+  it('reads the repo’s version through a byte-order mark (a file saved by Notepad)', async () => {
+    const first = studioSave(null);
+    fs.writeFileSync(files.tuningFile, `${String.fromCharCode(0xfeff)}${stringifyTuning(first)}`);
+    const next = makeSave({ values: valuesWith({}), map: null, note: 'back to normal', previous: first, now: '2026-10-12T10:06:00.000Z', builtInMap: REPO_MAP });
+    expect((await post(next)).status).toBe(200);
+    expect(parseTuning(read().tuning).file.revision).toBe(2);
+  });
+
   it('takes a save from the game page itself (also on a phone over Wi-Fi)', async () => {
     const answer = await post(studioSave(null), { host: '192.168.1.20:5173', origin: 'http://192.168.1.20:5173' });
     expect(answer.status).toBe(200);

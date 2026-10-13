@@ -119,7 +119,8 @@ function readBody(req, max) {
  * The dev server's /__copper/tuning endpoint (exported, with its file paths, for the unit test).
  * GET answers { tuning, map }: that it answers at all tells the Studio it can save here. POST
  * { tuning } checks the file and only then writes it: the map into `mapFile` (ending with a
- * newline), everything else into `tuningFile` with map null. A bad request writes nothing.
+ * newline), everything else into `tuningFile` with map null. A bad request writes nothing, and
+ * neither does a save made from an older version than the repo's (409).
  */
 export function tuningEndpoint({ tuningFile, mapFile, loadTuning, maxBody = MAX_BODY }) {
   async function save(req) {
@@ -140,6 +141,13 @@ export function tuningEndpoint({ tuningFile, mapFile, loadTuning, maxBody = MAX_
     const { parseTuning, stringifyTuning } = await loadTuning();
     // Unknown values are dropped and numbers clamped, exactly as the game does when it loads the file.
     const { file, warnings } = parseTuning(JSON.stringify(request.tuning));
+    // Compare-and-set, like publishing on claude.ai: a save is one version on from the repo's, or it
+    // was made from an older one (another tab saved, or a pull ran since the page loaded) and would
+    // quietly undo those changes.
+    const repo = parseTuning(readText(tuningFile)?.trim()).file; // trim() drops a byte-order mark, as tuningTag() does
+    if (file.revision !== repo.revision + 1) {
+      return [409, { error: `The project's balance changed since this page loaded (another tab saved, or a pull or git checkout): it is at version ${repo.revision} now, and this save was made from version ${file.revision - 1}.` }];
+    }
     const written = [];
     if (file.map !== null) {
       // The map lives in its own file in the repo; the tuning file keeps only the numbers.

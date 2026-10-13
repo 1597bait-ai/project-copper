@@ -1,22 +1,28 @@
 // End-to-end check in a real (headless) browser. Plays through the core rules, the students, the
 // sleepy coworker and the map editor on a desktop screen, then the touch controls on phones held
-// sideways and upright. Saves screenshots to .smoke/.
+// sideways and upright, then Copper Studio: its settings, play tests and Map tab, a save round trip
+// through the game page as claude.ai publishes it, and the Studio on a phone. Saves screenshots to
+// .smoke/.
 //
-//   npm run build && npm run e2e
+//   npm run build && npm run build:single && npm run e2e
 //   E2E_URL=http://localhost:5173 npm run e2e     (against a running dev server instead)
-//   E2E_ONLY=students,editor npm run e2e          (just some parts: desktop, students, coworker, editor, phone, portrait)
+//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, editor, studio, phone, portrait)
 //
 // Uses debug access via window.__COPPER__ to teleport people around. Every position comes from the
 // map and the world at runtime (fixtures by type, open hallway stretches, reachable tiles), and the
 // tuning numbers from window.__COPPER__.balance, so the checks keep working when the map or
-// src/config/balance.ts is edited.
+// src/config/balance.ts is edited. The Studio checks take their settings from src/config/schema.ts.
 
 import { chromium, devices } from 'playwright';
-import { preview } from 'vite';
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { createServer, preview } from 'vite';
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { buildArtifactPage } from './artifact-page.mjs';
+import { buildPageContent, parsePage, wrapInHost } from '../src/studio/page.ts';
 
 const OUT = '.smoke';
 const T = 64;
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 await mkdir(OUT, { recursive: true });
 const server = process.env.E2E_URL ? null : await preview({ preview: { port: 4317 }, logLevel: 'silent' });
 const url = process.env.E2E_URL ?? server.resolvedUrls.local[0];
@@ -30,31 +36,6 @@ const check = (label, cond, info) => {
   console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`, cond ? '' : JSON.stringify(info ?? ''));
   if (!cond) failed++;
 };
-
-// The pixel font comes from Google Fonts. Fetch it once for the whole run (so screenshots show it
-// and no page waits on the network); if that fails the game uses its fallback font, which it must
-// handle anyway, and the failed request isn't counted as a console error.
-const FONT_HOSTS = /fonts\.(googleapis|gstatic)\.com/;
-const fontCache = new Map();
-let fontMissing = false;
-async function serveFonts(context) {
-  await context.route(FONT_HOSTS, async (route) => {
-    const key = route.request().url();
-    if (!fontCache.has(key)) {
-      fontCache.set(
-        key,
-        route
-          .fetch()
-          .then(async (r) => (r.ok() ? { status: r.status(), headers: r.headers(), body: await r.body() } : null))
-          .catch(() => null),
-      );
-    }
-    const hit = await fontCache.get(key);
-    if (hit) return route.fulfill(hit);
-    fontMissing = true;
-    return route.abort();
-  });
-}
 
 /**
  * Helpers available to every snippet run in the page (g = Game scene). Tiles are {x, y} in map cells.
@@ -162,20 +143,31 @@ function sceneObjects(scene) {
   walk(scene.children.list);
   return out;
 }
+/** The map editor (ed): where the middle of map cell t is on the screen, in game pixels. */
+function edScreen(t) {
+  const c = ed.mapCam;
+  return { x: c.x + ((t.x + 0.5) * T - c.worldView.x) * c.zoom, y: c.y + ((t.y + 0.5) * T - c.worldView.y) * c.zoom };
+}
+/** Whether a click on cell t paints it (it isn't under the problems panel, the toolbar or the palette). */
+function edClickable(t) {
+  const p = edScreen(t);
+  return ed.regionAt(p.x, p.y) === 'map';
+}
+/** The first hallway cell (top-left first) with hallway all around that a click can paint. */
+function edOpenHall() {
+  const at = (x, y) => ed.rows[y]?.[x];
+  const open = (x, y) => [-1, 0, 1].every((dy) => [-1, 0, 1].every((dx) => at(x + dx, y + dy) === '.'));
+  for (let y = 0; y < ed.rows.length; y++) for (let x = 0; x < ed.rows[y].length; x++) if (open(x, y) && edClickable({ x, y })) return { x, y };
+  return null;
+}
 `;
 
-async function open(name, contextOptions) {
-  // This part's screenshots from earlier runs (so .smoke/ never shows a stale picture).
-  for (const f of await readdir(OUT)) if (f.startsWith(`${name}-`)) await rm(`${OUT}/${f}`);
-  const context = await browser.newContext(contextOptions);
-  await serveFonts(context);
-  const page = await context.newPage();
-  const errors = [];
-  page.on('console', (m) => m.type() === 'error' && !FONT_HOSTS.test(m.location().url ?? '') && errors.push(m.text()));
-  page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(url);
-  await page.waitForFunction(() => window.__COPPER__?.game.scene.isActive('Menu'), null, { timeout: 30000 });
-  // Headless windows never have focus, and Phaser slows the clock down for unfocused windows.
+/**
+ * Waits for the game to start and keeps its clock running: headless windows never have focus, and
+ * Phaser slows the clock down for unfocused windows. Again after every reload.
+ */
+async function booted(page) {
+  await page.waitForFunction(() => window.__COPPER__?.game, null, { timeout: 60000 });
   await page.evaluate(() => {
     const loop = window.__COPPER__.game.loop;
     setInterval(() => {
@@ -183,6 +175,31 @@ async function open(name, contextOptions) {
       loop._coolDown = 0;
     }, 50);
   });
+}
+
+/** What open() waits for: the game's menu, or Copper Studio (opened by #studio in the address). */
+const READY = {
+  menu: () => window.__COPPER__.game.scene.isActive('Menu'),
+  studio: () => window.__COPPER__.studio?.isOpen && document.querySelector('.cs-search') !== null,
+};
+
+/**
+ * Opens the game in a fresh browser (no stored draft or progress). `target` is the page to load
+ * (the preview build by default) and `setup(context)` runs before it does (routes, a stand-in for
+ * claude.ai).
+ */
+async function open(name, contextOptions, { target = url, setup = null, ready = 'menu' } = {}) {
+  // This part's screenshots from earlier runs (so .smoke/ never shows a stale picture).
+  for (const f of await readdir(OUT)) if (f.startsWith(`${name}-`)) await rm(`${OUT}/${f}`);
+  const context = await browser.newContext(contextOptions);
+  if (setup) await setup(context);
+  const page = await context.newPage();
+  const errors = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(target);
+  await booted(page);
+  await page.waitForFunction(READY[ready], null, { timeout: 60000 });
 
   /** Run code with g = Game scene, h = Hud scene, gm = Phaser.Game, ed = Editor scene, and the LIB helpers. */
   const G = (src) =>
@@ -288,6 +305,148 @@ async function open(name, contextOptions) {
   };
 
   return { context, page, errors, G, waitFor, wait, trace, stopTrace, watchToasts, tap, shot, sceneActive, toScreen, hudToScreen, buttonPos, click, shiftLength, endShift };
+}
+
+// ---- Copper Studio helpers ---------------------------------------------------------------------
+
+/** Modules of the game's own source (what the Studio should show), loaded through Vite like tools/map.mjs does. */
+async function loadSource(paths) {
+  const vite = await createServer({
+    root: ROOT,
+    configFile: false,
+    server: { middlewareMode: true, hmr: false, watch: null },
+    optimizeDeps: { noDiscovery: true, include: [] },
+    appType: 'custom',
+    logLevel: 'silent',
+  });
+  try {
+    const modules = [];
+    for (const path of paths) modules.push(await vite.ssrLoadModule(path));
+    return modules;
+  } finally {
+    await vite.close();
+  }
+}
+
+/** The grid of a map's text, row by row: what the map parser reads (no notes, room names or blank lines). */
+const gridRows = (text) =>
+  text
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line && !line.trimStart().startsWith('//') && !line.startsWith('@'));
+
+/** Drives Copper Studio the way a person does: with clicks, or with taps on a phone. */
+function studioKit(page, { touch = false } = {}) {
+  const press = (locator) => (touch ? locator.tap() : locator.click());
+  const until = (fn, arg = null, timeout = 60000) => page.waitForFunction(fn, arg, { timeout, polling: 100 });
+  const kit = {
+    press,
+    until,
+    /** Whether `fn` comes true within `timeout` ms. */
+    holds: (fn, arg = null, timeout = 20000) => until(fn, arg, timeout).then(
+      () => true,
+      () => false,
+    ),
+    snapshot: () => page.evaluate(() => window.__COPPER__.studio.snapshot()),
+    /** The header's count of unsaved changes. */
+    unsaved: async () => Number(await page.locator('.cs-chip[data-unsaved]').getAttribute('data-unsaved')),
+    field: (path) => page.locator(`.cs-field[data-path="${path}"]`),
+    /** A setting's markers: "Unsaved · was 2 Undo", "Shipped: 2 Reset". */
+    status: (path) => kit.field(path).locator('.cs-status').textContent(),
+    /** Presses a setting's Undo or Reset. */
+    link: (path, text) => press(kit.field(path).locator('.cs-status .cs-link', { hasText: text })),
+    /** Opens a tab: a section's id, 'map' or 'history'. */
+    tab: async (id) => {
+      await press(page.locator(`.cs-tab[data-tab="${id}"]`));
+      await until((id) => document.querySelector(`.cs-tab[data-tab="${id}"]`)?.getAttribute('aria-selected') === 'true', id);
+    },
+    /** Types a number into a setting on the open tab, then leaves the box. */
+    type: async (path, value) => {
+      const input = kit.field(path).locator('input.cs-num').first();
+      if (touch) await input.tap();
+      await input.fill(String(value));
+      await input.blur();
+    },
+    /** Picks an item from the header's ⋯ menu. */
+    menu: async (item) => {
+      await press(page.locator('.cs-menuwrap .cs-btn'));
+      await press(page.locator('.cs-menu button', { hasText: item }));
+    },
+  };
+  return kit;
+}
+
+/** The labels of the menu's buttons. */
+const menuButtons = (page) => page.evaluate(() => window.__COPPER__.game.scene.getScene('Menu').children.list.filter((o) => o.label).map((o) => o.label.text));
+
+/** The balance label in a screen's corner ("Balance v3 · 12 Oct 2026", or "Play test · …"), or null. */
+const screenLabel = (page, scene = 'Menu') =>
+  page.evaluate((scene) => window.__COPPER__.game.scene.getScene(scene).children.list.find((o) => o.type === 'Text' && /^(Balance v|Play test)/.test(o.text))?.text ?? null, scene);
+
+/** The Studio's floating ◀ STUDIO button during a play test: whether it shows, and the HUD windows it covers (none, it should). */
+const backButton = (page) =>
+  page.evaluate(() => {
+    const gm = window.__COPPER__.game;
+    const el = document.querySelector('.cs-back');
+    if (!el || el.hidden) return { visible: false, hits: [] };
+    const b = el.getBoundingClientRect();
+    const c = gm.canvas.getBoundingClientRect();
+    // The HUD's windows (none on the end screen or the menu).
+    const hud = gm.registry.get('hud:layout');
+    const k = hud ? c.width / hud.width : 1;
+    const hits = (hud?.boxes ?? [])
+      .map((x) => ({ left: c.left + x.x * k, top: c.top + x.y * k, right: c.left + (x.x + x.w) * k, bottom: c.top + (x.y + x.h) * k }))
+      .filter((x) => b.left < x.right && x.left < b.right && b.top < x.bottom && x.top < b.bottom);
+    return { visible: b.width > 0 && b.height > 0, hits, at: [b.left, b.top, b.width, b.height] };
+  });
+
+/** How far Copper Studio sticks out sideways on this screen: nothing should (the tab strip scrolls on purpose). */
+const sideways = (page) =>
+  page.evaluate(() => {
+    const W = document.documentElement.clientWidth;
+    const main = document.querySelector('.cs-main');
+    const out = [...document.querySelectorAll('.cs *')].filter((el) => {
+      if (el.closest('.cs-tabs')) return false;
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && (r.right > W + 1 || r.left < -1);
+    });
+    return { page: document.documentElement.scrollWidth - W, main: main.scrollWidth - main.clientWidth, out: out.slice(0, 5).map((el) => `${el.tagName.toLowerCase()}.${el.className}`) };
+  });
+
+/** Where the stand-in for claude.ai serves the published game page. */
+const PAGE_URL = 'https://copper.test/game';
+
+/**
+ * A stand-in for claude.ai, for open()'s `setup`: PAGE_URL serves the newest of `host.versions` (the
+ * published page, wrapped in the host's skeleton). `canEdit` true or false gives the page claude.ai's
+ * runtime (window.claude) for a viewer who may or may not publish; null is a viewer without it (not
+ * signed in). A publish becomes the newest version, and the view reloads a moment later, as on claude.ai.
+ */
+function hostSetup(host, canEdit) {
+  return async (context) => {
+    await context.route(PAGE_URL, (route) => route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: host.versions.at(-1) }));
+    if (canEdit === null) return;
+    await context.exposeBinding('__hostPublish', (_source, html) => {
+      host.versions.push(html);
+      return { version: `v${host.versions.length}` };
+    });
+    await context.addInitScript((canEdit) => {
+      const caps = {
+        artifact: Object.freeze({
+          publish: async (html) => {
+            if (!canEdit) throw Object.assign(new Error('Only the owner or an editor can publish.'), { code: 'not_writer' });
+            const result = await window.__hostPublish(html);
+            setTimeout(() => location.reload(), 300);
+            return result;
+          },
+        }),
+        user: Object.freeze({ canEdit: async () => canEdit }),
+        downloads: Object.freeze({ save: async () => ({ status: 'saved' }) }),
+      };
+      window.claude = Object.freeze({ use: async (name) => caps[name] ?? null });
+    }, canEdit);
+  };
 }
 
 // ---- desktop: menu, crew select and the rules ------------------------------------------------
@@ -640,20 +799,29 @@ if (runs('coworker')) {
   await context.close();
 }
 
-// ---- desktop: map editor ----------------------------------------------------------------------
+// ---- desktop: the map editor, in Copper Studio's Map tab ------------------------------------------
 if (runs('editor')) {
-  const { context, page, errors, G, wait, shot, sceneActive, toScreen, buttonPos, click, endShift } = await open('editor', { viewport: { width: 1600, height: 900 } });
-  await click(await buttonPos('Menu', 'MAP EDITOR'));
+  const { context, page, errors, G, wait, shot, sceneActive, toScreen, click, endShift } = await open(
+    'editor',
+    { viewport: { width: 1600, height: 900 } },
+    { target: `${url}#studio`, ready: 'studio' },
+  );
+  const kit = studioKit(page);
+  await kit.tab('map');
   await sceneActive('Editor');
-  await page.waitForTimeout(800);
+  await kit.until(() => !window.__COPPER__.game.scene.getScene('Editor').cameras.main.fadeEffect.isRunning);
   await shot('open');
   const cell = (c) => toScreen('Editor', (c.x + 0.5) * T, (c.y + 0.5) * T, 'mapCam');
   const editor = (src) => G(`const rows = ed.rows; const at = (x, y) => rows[y]?.[x]; ${src}`);
+  /** Whether `cond` (using ed) comes true within a few seconds. */
+  const edHolds = (cond, timeout = 10000) => kit.holds((cond) => new Function('ed', `return (${cond});`)(window.__COPPER__.game.scene.getScene('Editor')), cond, timeout);
+  /** The editor has checked the map since the last edit (300 ms of game time after it). */
+  const checked = 'ed.validateTimer === null && !ed.dirty';
 
   // Spots found in the map text: a hallway stretch with hallway above and below, two hallway tiles
-  // with hallway all around, and open asphalt for a car.
+  // with hallway all around, and open asphalt for a car (all where a click reaches the map).
   const spots = await editor(`
-    const open = (x, y, ch, r = 1) => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (at(x + dx, y + dy) !== ch) return false; return true; };
+    const open = (x, y, ch, r = 1) => { for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (at(x + dx, y + dy) !== ch) return false; return edClickable({ x, y }); };
     let wall = null, pile = null, plant = null, car = null;
     for (let y = 0; y < rows.length; y++) for (let x = 0; x < rows[y].length; x++) {
       if (!wall && [0, 1, 2, 3, 4, 5, 6].every((i) => open(x + i, y, '.'))) wall = { x, y };
@@ -673,42 +841,34 @@ if (runs('editor')) {
   await page.mouse.down();
   await page.mouse.move(b.x, b.y, { steps: 3 });
   await page.mouse.up();
-  await page.waitForTimeout(300);
   const wallRow = `ed.rows[${wall.y}].slice(${wall.x}, ${wall.x + 7})`;
-  check('dragging paints a wall with no gaps', await G(`return ${wallRow} === '#######';`), await G(`return ed.rows[${wall.y}];`));
+  check('dragging paints a wall with no gaps', await edHolds(`${wallRow} === '#######'`), await G(`return ed.rows[${wall.y}];`));
   await page.keyboard.press('Control+z');
-  await page.waitForTimeout(200);
-  check('undo takes the whole stroke back', await G(`return !${wallRow}.includes('#');`));
+  check('undo takes the whole stroke back', await edHolds(`!${wallRow}.includes('#')`));
   await page.keyboard.press('Control+y');
-  await page.waitForTimeout(200);
-  check('redo puts it back', await G(`return ${wallRow} === '#######';`));
+  check('redo puts it back', await edHolds(`${wallRow} === '#######'`));
   await page.keyboard.press('Control+z');
-  await page.waitForTimeout(200);
+  await edHolds(`!${wallRow}.includes('#')`);
 
   // Place an abandoned copper pile and a plant.
   await G("ed.selectTool('c');");
   await click(await cell(pile));
-  await page.waitForTimeout(300);
-  check('placed a copper pile', await G(`return ed.rows[${pile.y}][${pile.x}] === 'c';`));
+  check('placed a copper pile', await edHolds(`ed.rows[${pile.y}][${pile.x}] === 'c'`));
   await G("ed.selectTool('*');");
   await click(await cell(plant));
-  await page.waitForTimeout(300);
-  check('placed a plant', await G(`return ed.rows[${plant.y}][${plant.x}] === '*';`));
+  check('placed a plant', await edHolds(`ed.rows[${plant.y}][${plant.x}] === '*'`));
 
   // A car is stamped whole (2x2, the tapped tile at its top-left) and erased whole.
   const carCells = `[0, 1].flatMap((dy) => [0, 1].map((dx) => ed.rows[${car.y} + dy][${car.x} + dx]))`;
   await G("ed.selectTool('C');");
   await click(await cell(car));
-  await page.waitForTimeout(300);
-  check('stamps a whole 2x2 car', await G(`return ${carCells}.join('') === 'CCCC';`), await G(`return ${carCells};`));
-  await page.waitForTimeout(500);
+  check('stamps a whole 2x2 car', await edHolds(`${carCells}.join('') === 'CCCC'`), await G(`return ${carCells};`));
+  await edHolds(checked);
   await shot('car');
   await G("ed.selectTool('erase');");
   await click(await cell({ x: car.x + 1, y: car.y + 1 }));
-  await page.waitForTimeout(300);
-  check('erasing one corner of the car removes all of it', await G(`return ${carCells}.join('') === 'pppp';`), await G(`return ${carCells};`));
-  await page.waitForTimeout(500);
-  check('problems panel says ready to play', await G('return ed.report.errors.length === 0;'), await G('return ed.report.errors;'));
+  check('erasing one corner of the car removes all of it', await edHolds(`${carCells}.join('') === 'pppp'`), await G(`return ${carCells};`));
+  check('problems panel says ready to play', (await edHolds(checked)) && (await G('return ed.report.errors.length === 0;')), await G('return ed.report.errors;'));
   await shot('edited');
 
   const play = await G("const b = ed.buttons.find((b) => b.label.text === 'PLAY'); return { x: b.rect.centerX, y: b.rect.centerY };");
@@ -726,12 +886,660 @@ if (runs('editor')) {
   await wait(1);
   await shot('played');
   await endShift();
-  await click(await buttonPos('ShiftEnd', 'EDIT MAP'));
-  await sceneActive('Editor');
-  await page.waitForTimeout(500);
-  check('EDIT MAP after the shift goes back to the same map', await G(`return ed.rows[${pile.y}][${pile.x}] === 'c' && ed.rows[${plant.y}][${plant.x}] === '*';`));
+  // The end screen has no EDIT MAP any more: the play test's ◀ STUDIO goes back to the Map tab.
+  await page.click('.cs-back');
+  await kit.until(() => window.__COPPER__.studio.isOpen && window.__COPPER__.game.scene.isActive('Editor'));
+  check(
+    '◀ STUDIO after the shift goes back to the Map tab, on the same map',
+    (await page.getAttribute('.cs-tab[data-tab="map"]', 'aria-selected')) === 'true' && (await G(`return ed.rows[${pile.y}][${pile.x}] === 'c' && ed.rows[${plant.y}][${plant.x}] === '*';`)),
+  );
   check('no console errors (editor)', errors.length === 0, errors);
   await context.close();
+}
+
+// ---- Copper Studio: settings, play tests and the Map tab; saving on claude.ai; on a phone ----------
+if (runs('studio')) {
+  // What the Studio should show comes from its source: the settings list (src/config/schema.ts),
+  // the tuning rules and the Studio's search.
+  const [schema, tuning, fieldsModule, mapText, maps] = await loadSource(['/src/config/schema.ts', '/src/config/tuning.ts', '/src/studio/fields.ts', '/src/world/mapText.ts', '/src/world/maps.ts']);
+  const { SECTIONS, FIELD_BY_PATH, checkValue, formatValue } = schema;
+  const { DEFAULTS, getPath, valuesWith } = tuning;
+  const { searchFields } = fieldsModule;
+  const { mapNotes } = mapText;
+  const { DEFAULT_MAP } = maps;
+  const GRAVY = 'npcs.mr_gravy.speed';
+  const DALTON = 'characters.dalton.stats.speed';
+  const SHIFT = 'balance.shift.lengthSeconds';
+  const HUSH = 'balance.sleepyCoworker.hushMoney';
+  const sectionOf = (path) => SECTIONS.find((s) => s.groups.some((g) => g.fields.some((f) => f.path === path))).id;
+  const sectionFields = (id) => SECTIONS.find((s) => s.id === id).groups.flatMap((g) => g.fields);
+  const sameSet = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
+  const approx = (a, b) => typeof a === 'number' && Math.abs(a - b) < 1e-6;
+  /** The first of `options` that isn't `now` (so a check always changes something, whatever is saved). */
+  const other = (now, ...options) => options.find((v) => v !== now);
+  /** A preview as the field draws it (it shows nothing when its preview can't be worked out). */
+  const previewOf = (field, values) => {
+    try {
+      return field.preview(values);
+    } catch {
+      return '';
+    }
+  };
+  /** The value of `path` in the draft (the shipped value with the draft's overrides on top). */
+  const draftValue = async (kit, path) => getPath(valuesWith((await kit.snapshot()).draft.values), path);
+  const cellOf = (toScreen) => (c) => toScreen('Editor', (c.x + 0.5) * T, (c.y + 0.5) * T, 'mapCam');
+  const editorButton = async (G, toScreen, label) => {
+    const b = await G(`const b = ed.buttons.find((b) => b.label.text === ${JSON.stringify(label)}); return { x: b.rect.centerX, y: b.rect.centerY };`);
+    return toScreen('Editor', b.x, b.y, 'uiCam');
+  };
+  const editorReady = (kit, timeout) =>
+    kit.until(() => window.__COPPER__.game.scene.isActive('Editor') && !window.__COPPER__.game.scene.getScene('Editor').cameras.main.fadeEffect.isRunning, null, timeout);
+
+  // ---- (a)-(c) on the preview build: a static copy, so the Studio opens (with #studio) but can't save.
+  {
+    const { context, page, errors, G, wait, shot, sceneActive, toScreen, click, endShift } = await open(
+      'studio',
+      { viewport: { width: 1600, height: 900 } },
+      { target: `${url}#studio`, ready: 'studio' },
+    );
+    const kit = studioKit(page);
+    const saved = await page.evaluate(() => window.__COPPER__.tuning());
+    const savedValues = valuesWith(saved.values);
+
+    if (!process.env.E2E_URL) {
+      const readonly = await kit.holds(() => document.querySelector('.cs-note[data-note="readonly"]') !== null);
+      const save = await page.locator('.cs-head .cs-btn.is-primary').evaluate((b) => ({ disabled: b.disabled, title: b.title }));
+      check(
+        'Studio on a static copy (the preview build): #studio opens it with saving off, saying why',
+        readonly && save.disabled && /static copy/.test(save.title) && /Export/.test(await page.locator('.cs-note[data-note="readonly"]').textContent()),
+        save,
+      );
+    }
+
+    // (a) Every section shows every one of its settings, rare ones folded away, previews worked out.
+    for (const section of SECTIONS) {
+      await kit.tab(section.id);
+      const shown = await page.$$eval('.cs-main .cs-field[data-path]', (els) =>
+        els.map((el) => ({
+          path: el.dataset.path,
+          label: el.querySelector('.cs-label')?.textContent ?? '',
+          control: el.querySelector('.cs-control input, .cs-control select, .cs-control textarea') !== null,
+          preview: el.querySelector('.cs-preview')?.textContent ?? null,
+          folded: el.offsetParent === null,
+        })),
+      );
+      const want = section.groups.flatMap((g) => g.fields);
+      const byPath = new Map(shown.map((s) => [s.path, s]));
+      const wrong = want
+        .filter((f) => {
+          const s = byPath.get(f.path);
+          return !s || s.label !== f.label || !s.control || s.folded !== !!f.advanced || (f.preview && s.preview !== previewOf(f, savedValues));
+        })
+        .map((f) => ({ path: f.path, shown: byPath.get(f.path), preview: f.preview ? previewOf(f, savedValues) : undefined }));
+      check(
+        `Studio: ${section.title} shows all ${want.length} of its settings with their controls and previews (rare ones under "More settings")`,
+        shown.length === want.length && wrong.length === 0,
+        { shown: shown.length, want: want.length, wrong: wrong.slice(0, 3) },
+      );
+      if (section.id === 'crew' || section.id === 'loot') await shot(section.id);
+    }
+    const rare = SECTIONS.flatMap((s) => s.groups.map((g) => ({ section: s.id, group: g, n: g.fields.filter((f) => f.advanced).length }))).find((x) => x.n > 0);
+    if (rare) {
+      await kit.tab(rare.section);
+      const more = page.locator(`.cs-card[data-group="${rare.group.id}"] .cs-more`);
+      const label = await more.textContent();
+      await more.click();
+      const unfolded = await page.$$eval(`.cs-card[data-group="${rare.group.id}"] .cs-field`, (els) => els.every((el) => el.offsetParent !== null));
+      check(`..."More settings (${rare.n})" unfolds the rare ones (${rare.group.title})`, label.includes(`More settings (${rare.n})`) && unfolded, label);
+    }
+
+    // Editing a value: its preview and the unsaved count follow.
+    const gravyField = FIELD_BY_PATH.get(GRAVY);
+    const gravyNow = getPath(savedValues, GRAVY);
+    const gravyNew = other(gravyNow, 1.5, 2.5);
+    await kit.tab('gravy');
+    const before = { preview: await kit.field(GRAVY).locator('.cs-preview').textContent(), unsaved: await kit.unsaved() };
+    await kit.type(GRAVY, gravyNew);
+    const typed = await page.evaluate((path) => {
+      const el = document.querySelector(`.cs-field[data-path="${path}"]`);
+      return {
+        preview: el.querySelector('.cs-preview').textContent,
+        marked: el.classList.contains('is-unsaved'),
+        unsaved: Number(document.querySelector('.cs-chip[data-unsaved]').dataset.unsaved),
+        badge: document.querySelector('.cs-tab[data-tab="gravy"] .cs-count:not([hidden])')?.textContent ?? null,
+      };
+    }, GRAVY);
+    const gravyPreview = previewOf(gravyField, valuesWith((await kit.snapshot()).draft.values));
+    check(
+      `Studio: typing ${gravyNew} for Mr. Gravy's speed updates its preview, the unsaved count and the tab's badge`,
+      (await draftValue(kit, GRAVY)) === gravyNew && typed.preview === gravyPreview && typed.preview !== before.preview && typed.unsaved === before.unsaved + 1 && typed.badge === '1' && typed.marked,
+      { typed, gravyPreview, before },
+    );
+    await shot('edited');
+    // Past the limit: clamped, and the field says so.
+    const max = gravyField.kind.max;
+    const gravyInput = kit.field(GRAVY).locator('input.cs-num');
+    await gravyInput.fill(String(max + 91));
+    const clampNote = await kit.field(GRAVY).locator('.cs-msg').textContent();
+    await gravyInput.blur();
+    check(
+      `...a number past its limit is clamped to ${max}, saying so`,
+      (await draftValue(kit, GRAVY)) === max && (await gravyInput.inputValue()) === String(max) && clampNote.includes(String(max)),
+      { clampNote, input: await gravyInput.inputValue() },
+    );
+    // Per-field Undo (back to the saved value) and Reset (back to the shipped one).
+    await kit.type(GRAVY, gravyNew);
+    const status = await kit.status(GRAVY);
+    await kit.link(GRAVY, 'Undo');
+    const undone = { value: await draftValue(kit, GRAVY), input: await gravyInput.inputValue(), unsaved: await kit.unsaved() };
+    check(
+      `...its Undo puts back the saved value (${gravyNow})`,
+      status.includes(`was ${formatValue(gravyField, gravyNow)}`) && undone.value === gravyNow && undone.input === String(gravyNow) && undone.unsaved === before.unsaved,
+      { status, undone },
+    );
+    const shippedGravy = getPath(DEFAULTS, GRAVY);
+    await kit.type(GRAVY, gravyNew);
+    await kit.link(GRAVY, 'Reset');
+    check(
+      `...and its Reset the value the game ships with (${shippedGravy})`,
+      (await draftValue(kit, GRAVY)) === shippedGravy && (await gravyInput.inputValue()) === String(shippedGravy),
+      await gravyInput.inputValue(),
+    );
+
+    // Search: every matching setting, from every section, and only those.
+    await page.fill('.cs-search', 'speed');
+    await kit.until(() => document.querySelector('.cs-main .cs-h1')?.textContent === 'Search');
+    const hits = await page.$$eval('.cs-main .cs-field[data-path]', (els) => els.map((el) => el.dataset.path));
+    const wantHits = searchFields('speed').map((hit) => hit.field.path);
+    const crumbs = await page.$$eval('.cs-main .cs-crumb', (els) => [...new Set(els.map((el) => el.textContent))]);
+    const selected = await page.$$eval('.cs-tab[aria-selected="true"]', (els) => els.length);
+    check(
+      `Studio: searching "speed" shows exactly the ${wantHits.length} settings that match, under their sections`,
+      sameSet(hits, wantHits) && crumbs.length > 1 && selected === 0,
+      { hits, wantHits, crumbs },
+    );
+    await shot('search');
+    await page.fill('.cs-search', 'qqqzzz');
+    await kit.until(() => document.querySelector('.cs-main .cs-blurb')?.textContent.startsWith('Nothing matches'));
+    check('...and nothing for a word no setting has', (await page.locator('.cs-main .cs-field').count()) === 0);
+    await page.press('.cs-search', 'Escape');
+    check(
+      '...Escape clears the search, back to the tab',
+      (await page.inputValue('.cs-search')) === '' && (await page.getAttribute('.cs-tab[data-tab="gravy"]', 'aria-selected')) === 'true',
+    );
+
+    // (b) Play test: the draft runs in a real shift.
+    const daltonNow = getPath(savedValues, DALTON);
+    const daltonNew = other(daltonNow, 4, 2);
+    await kit.type(GRAVY, gravyNew);
+    await kit.tab('crew');
+    await kit.type(DALTON, daltonNew);
+    const pending = await kit.unsaved();
+    await page.selectOption('.cs-play select', 'dalton');
+    await page.click('.cs-play .cs-btn');
+    await sceneActive('Game');
+    await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.3 && window.__COPPER__.game.registry.get('hud:layout'));
+    const run = await G(`return {
+      playing: window.__COPPER__.studio.isPlaying, studioHidden: document.querySelector('.cs').hidden, crew: g.player.character.id,
+      player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNew}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNew}) * T };`);
+    check(
+      `Studio: Play test runs the draft: Dalton walks at speed ${daltonNew}, Mr. Gravy chases at speed ${gravyNew}`,
+      run.playing && run.studioHidden && run.crew === 'dalton' && approx(run.player, run.wantPlayer) && approx(run.boss, run.wantBoss),
+      run,
+    );
+    const back = await backButton(page);
+    check('...with a ◀ STUDIO button clear of the HUD', back.visible && back.hits.length === 0, back);
+    await shot('playtest');
+    await endShift();
+    const endLabel = await screenLabel(page, 'ShiftEnd');
+    check(
+      '...its end screen says it was a play test of the draft, ◀ STUDIO still there',
+      endLabel === `Play test · draft, ${pending} unsaved change${pending === 1 ? '' : 's'}` && (await backButton(page)).visible,
+      endLabel,
+    );
+    await shot('playtest-end');
+    await page.click('.cs-back');
+    await kit.until(() => window.__COPPER__.studio.isOpen && !window.__COPPER__.game.scene.isActive('ShiftEnd'));
+    check('◀ STUDIO comes back to the Studio, the draft as it was', (await kit.unsaved()) === pending && !(await backButton(page)).visible);
+    await kit.menu('Exit studio');
+    await sceneActive('Menu');
+    const exited = await page.evaluate(() => ({ tuning: window.__COPPER__.tuning(), hash: location.hash, studio: window.__COPPER__.studio.isOpen }));
+    const menuLabel = await screenLabel(page);
+    check(
+      'Exit studio goes back to the game running the saved version (the draft is kept for next time)',
+      !exited.studio && exited.tuning.revision === saved.revision && JSON.stringify(exited.tuning.values) === JSON.stringify(saved.values) && exited.hash === '' && !menuLabel?.startsWith('Play test') && (await kit.snapshot()).unsaved === pending,
+      { exited, menuLabel },
+    );
+    await page.keyboard.press('Enter');
+    await sceneActive('Game');
+    await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.2);
+    const real = await G(`return { player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNow}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNow}) * T };`);
+    check('...a shift from the menu has the saved speeds again', approx(real.player, real.wantPlayer) && approx(real.boss, real.wantBoss), real);
+
+    // (c) The Map tab: the editor inside the Studio, its edits in the draft, play tested.
+    await page.evaluate(() => (location.hash = '#studio'));
+    await kit.until(() => window.__COPPER__.studio.isOpen);
+    await kit.tab('map');
+    await editorReady(kit);
+    const placed = await page.evaluate(() => {
+      const rect = (el) => {
+        const r = el.getBoundingClientRect();
+        return [r.left, r.top, r.width, r.height];
+      };
+      return { canvas: rect(window.__COPPER__.game.canvas), host: rect(document.querySelector('.cs-maphost')), head: rect(document.querySelector('.cs-head')), menu: window.__COPPER__.game.scene.isActive('Menu') };
+    });
+    check(
+      'Studio Map tab: the map editor runs inside the Studio, its canvas laid over the page area under the header',
+      placed.canvas.every((v, i) => Math.abs(v - placed.host[i]) <= 1) && placed.canvas[1] >= placed.head[1] + placed.head[3] - 1 && !placed.menu,
+      placed,
+    );
+    const spot = await G('return edOpenHall();');
+    const unsavedBefore = await kit.unsaved();
+    await G("ed.selectTool('c');");
+    await click(await cellOf(toScreen)(spot));
+    await kit.holds(() => window.__COPPER__.studio.snapshot().draft.map !== null);
+    const draftMap = (await kit.snapshot()).draft.map;
+    const badge = await page.locator('.cs-tab[data-tab="map"] .cs-count').isVisible();
+    check(
+      'a copper pile painted on the map lands in the draft map (the Map tab is marked unsaved)',
+      draftMap !== null && gridRows(draftMap)[spot.y]?.[spot.x] === 'c' && (await kit.unsaved()) === unsavedBefore + 1 && badge,
+      { spot, badge, unsaved: await kit.unsaved() },
+    );
+    await shot('map');
+    await click(await editorButton(G, toScreen, 'PLAY'));
+    await sceneActive('Game');
+    await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.2);
+    check(
+      "the editor's PLAY play tests the draft map: the copper pile is in the school",
+      await G(`return window.__COPPER__.studio.isPlaying && g.world.fixtures.some((f) => f.def.id === 'abandoned_copper_pile' && tileOf(f).x === ${spot.x} && tileOf(f).y === ${spot.y});`),
+    );
+    await G(`calm(); put(g.player.body, { x: ${spot.x}, y: ${spot.y + 1} });`);
+    await wait(0.5);
+    await shot('map-played');
+    await page.click('.cs-back');
+    await kit.until(() => window.__COPPER__.studio.isOpen && window.__COPPER__.game.scene.isActive('Editor'));
+    check(
+      '◀ STUDIO comes back to the Map tab, the pile still on the map',
+      (await page.getAttribute('.cs-tab[data-tab="map"]', 'aria-selected')) === 'true' && (await G(`return ed.rows[${spot.y}][${spot.x}] === 'c';`)),
+    );
+    check('no console errors (studio)', errors.length === 0, errors);
+    await context.close();
+  }
+
+  // ---- (d) the save round trip on claude.ai: the game page as it is published there ---------------
+  const single = await readFile(`${ROOT}dist-single/index.html`, 'utf8').catch(() => null);
+  check('the single-file build is there to make the claude.ai page from (npm run build:single)', single !== null);
+  if (single) {
+    const content = buildArtifactPage(single, await readFile(`${ROOT}src/config/tuning.json`, 'utf8'));
+    const original = parsePage(content);
+    const live = JSON.parse(original.tuning);
+    const next = live.revision + 1;
+    const liveValues = valuesWith(live.values);
+    const host = { versions: [wrapInHost(content)] };
+    const edits = {
+      [GRAVY]: other(getPath(liveValues, GRAVY), 1.5, 2.5),
+      [DALTON]: other(getPath(liveValues, DALTON), 4, 2),
+      [SHIFT]: other(getPath(liveValues, SHIFT), 240, 360),
+      [HUSH]: other(getPath(liveValues, HUSH), 75, 40),
+    };
+    const NOTE = "Gravy slower, a copper pile in the hall </script><b>!</b> $' $&";
+    let spot = null;
+    let published = null;
+
+    // The owner: STUDIO on the menu; values and the map changed; a broken map refused; Save.
+    {
+      const { context, page, errors, G, shot, sceneActive, toScreen, click, buttonPos } = await open(
+        'published-owner',
+        { viewport: { width: 1600, height: 900 } },
+        { target: PAGE_URL, setup: hostSetup(host, true) },
+      );
+      const kit = studioKit(page);
+      const offered = await kit.holds(() => window.__COPPER__.game.scene.getScene('Menu').children.list.some((o) => o.label?.text === 'STUDIO'), null, 30000);
+      check("claude.ai, the game's owner: the menu offers STUDIO beside START SHIFT", offered && (await menuButtons(page)).includes('START SHIFT'), await menuButtons(page));
+      await shot('menu');
+      await click(await buttonPos('Menu', 'STUDIO'));
+      await kit.until(READY.studio);
+      await kit.until(() => !document.querySelector('.cs-head .cs-btn.is-primary').title.startsWith('Checking'));
+      check('...STUDIO opens Copper Studio, Save waiting for a change', (await page.locator('.cs-head .cs-btn.is-primary').getAttribute('title')) === 'No unsaved changes');
+      for (const [path, value] of Object.entries(edits)) {
+        await kit.tab(sectionOf(path));
+        await kit.type(path, value);
+      }
+      const values = (await kit.snapshot()).draft.values;
+      check(`...the owner changes ${Object.keys(edits).length} values`, Object.entries(edits).every(([path, value]) => getPath(valuesWith(values), path) === value), values);
+
+      await kit.tab('map');
+      await editorReady(kit);
+      spot = await G('return edOpenHall();');
+      await G("ed.selectTool('c');");
+      await click(await cellOf(toScreen)(spot));
+      await kit.holds(() => window.__COPPER__.studio.snapshot().draft.map !== null);
+      check('...and paints a copper pile on the map', gridRows((await kit.snapshot()).draft.map ?? '')[spot.y]?.[spot.x] === 'c', spot);
+
+      // A map that can't be played can't be saved (or play tested) either.
+      const van = await G("const cells = []; ed.rows.forEach((r, y) => [...r].forEach((ch, x) => ch === 'V' && cells.push({ x, y }))); return cells.find(edClickable) ?? null;");
+      await G("ed.selectTool('erase');");
+      await click(await cellOf(toScreen)(van));
+      const broken = await kit.holds(() => {
+        const ed = window.__COPPER__.game.scene.getScene('Editor');
+        return ed.report.errors.length > 0 && ed.validateTimer === null && !ed.dirty;
+      });
+      const problem = await G('return ed.report.errors[0] ?? null;');
+      await page.click('.cs-head .cs-btn.is-primary');
+      await page.waitForSelector('.cs-dialog');
+      const refusal = await page.evaluate(() => ({ box: document.querySelector('.cs-dialog .cs-box.is-bad')?.textContent ?? '', saveOff: document.querySelector('.cs-dialog .cs-btn.is-primary').disabled }));
+      check("a map with a problem (the van erased) can't be saved: Save names the problem, its button off", broken && !!problem && refusal.saveOff && refusal.box.includes(problem), { problem, refusal });
+      await shot('map-refused');
+      await page.keyboard.press('Escape');
+      await page.click('.cs-play .cs-btn');
+      const noPlay = await kit.holds((p) => [...document.querySelectorAll('.cs-toast')].some((t) => t.textContent.includes(p)), problem, 5000);
+      check('...nor play tested', noPlay && !(await page.evaluate(() => window.__COPPER__.studio.isPlaying)));
+      await click(await editorButton(G, toScreen, 'UNDO'));
+      const fixed = await kit.holds(() => {
+        const ed = window.__COPPER__.game.scene.getScene('Editor');
+        const map = window.__COPPER__.studio.snapshot().draft.map ?? '';
+        // The van is back in the draft's grid (the legend notes at the top mention a V too).
+        const van = map.split('\n').some((line) => !line.startsWith('//') && !line.startsWith('@') && line.includes('V'));
+        return ed.report.errors.length === 0 && ed.validateTimer === null && !ed.dirty && van;
+      });
+      check('UNDO brings the van back: the map is fine again (the pile still there)', fixed && gridRows((await kit.snapshot()).draft.map ?? '')[spot.y]?.[spot.x] === 'c');
+
+      // Save with a note: the page republishes itself, and claude.ai reloads it.
+      await page.click('.cs-head .cs-btn.is-primary');
+      await page.waitForSelector('.cs-dialog');
+      const lines = await page.$$eval('.cs-dialog ul.cs-changes li', (els) => els.map((el) => el.textContent));
+      check(
+        `Save lists the ${Object.keys(edits).length + 1} changes (the map too)`,
+        lines.length === Object.keys(edits).length + 1 && lines.includes('Map › edited') && lines.some((l) => l.startsWith(`${FIELD_BY_PATH.get(GRAVY).where} › ${FIELD_BY_PATH.get(GRAVY).label}:`)),
+        lines,
+      );
+      await page.fill('#cs-save-note', NOTE);
+      await shot('save');
+      const reloaded = page.waitForEvent('load', { timeout: 90000 });
+      await page.getByRole('button', { name: `Save as version ${next}` }).click();
+      await reloaded;
+      await booted(page);
+      await kit.until(() => window.__COPPER__.studio?.isOpen && document.querySelector('.cs-note[data-note="saved"]') !== null);
+      const after = await page.evaluate(() => ({
+        note: document.querySelector('.cs-note[data-note="saved"]').textContent,
+        version: document.querySelector('.cs-chip[data-revision]').dataset.revision,
+        unsaved: document.querySelector('.cs-chip[data-unsaved]').dataset.unsaved,
+        revision: window.__COPPER__.tuning().revision,
+      }));
+      check(
+        `after claude.ai reloads the page, the Studio is back: "Saved as version ${next}", nothing unsaved`,
+        after.note.startsWith(`Saved as version ${next}. Everyone who opens the game gets it now.`) && after.version === String(next) && after.unsaved === '0' && after.revision === next,
+        after,
+      );
+      // It comes back on the tab it saved from (the Map tab): its picture once the art is drawn again.
+      if ((await page.getAttribute('.cs-tab[data-tab="map"]', 'aria-selected')) === 'true') await editorReady(kit);
+      await shot('saved');
+
+      published = host.versions[1] ?? '';
+      const back = parsePage(published);
+      const file = back && JSON.parse(back.tuning);
+      check(
+        'Save published the page once, as a complete document (the host skeleton around the page)',
+        host.versions.length === 2 && published.startsWith('<!doctype html>') && published.endsWith('</body></html>'),
+        { versions: host.versions.length, start: published.slice(0, 30), end: published.slice(-30) },
+      );
+      check(
+        '...the same game byte for byte (title, style, script): only the tuning inside changed',
+        back !== null && back.title === original.title && back.style === original.style && back.script === original.script && published === wrapInHost(buildPageContent({ ...original, tuning: back.tuning })),
+      );
+      check(
+        `...holding balance version ${next}: the values, the note and the map, in its history too`,
+        file?.revision === next &&
+          Object.entries(edits).every(([path, value]) => getPath(file.values, path) === value) &&
+          file.note === NOTE &&
+          gridRows(file.map ?? '')[spot.y]?.[spot.x] === 'c' &&
+          file.history[0]?.revision === next &&
+          file.history[0].note === NOTE &&
+          file.history[0].changes.includes('Map › edited'),
+        file && { revision: file.revision, values: file.values, note: file.note, history: file.history.map((h) => ({ revision: h.revision, changes: h.changes })) },
+      );
+      check("...and the note can't end the page's scripts early", (published.match(/<\/script>/gi) ?? []).length === 2);
+      check("...the saved map keeps the school's own notes", JSON.stringify(mapNotes(file?.map ?? '')) === JSON.stringify(mapNotes(DEFAULT_MAP.text)), mapNotes(file?.map ?? ''));
+
+      // With a saved version that isn't the shipped values, Undo and Reset go to different places.
+      const field = FIELD_BY_PATH.get(GRAVY);
+      const savedGravy = edits[GRAVY];
+      const shipped = getPath(DEFAULTS, GRAVY);
+      const third = [1.25, 1.75, 3].find((v) => v !== savedGravy && v !== shipped);
+      await kit.tab('gravy');
+      await kit.type(GRAVY, third);
+      const status = await kit.status(GRAVY);
+      await kit.link(GRAVY, 'Undo');
+      const undone = { input: await kit.field(GRAVY).locator('input.cs-num').inputValue(), unsaved: await kit.unsaved(), status: await kit.status(GRAVY) };
+      check(
+        `with version ${next} saved, a setting's Undo goes back to the saved ${savedGravy} (not the shipped ${shipped})`,
+        status.includes(`was ${formatValue(field, savedGravy)}`) && status.includes(`Shipped: ${formatValue(field, shipped)}`) && undone.input === String(savedGravy) && undone.unsaved === 0 && undone.status.includes('Shipped'),
+        { status, undone },
+      );
+      await kit.link(GRAVY, 'Reset');
+      const reset = { input: await kit.field(GRAVY).locator('input.cs-num').inputValue(), unsaved: await kit.unsaved(), status: await kit.status(GRAVY) };
+      check(`...and Reset to the shipped ${shipped}, an unsaved change from version ${next}`, reset.input === String(shipped) && reset.unsaved === 1 && reset.status.includes(`was ${formatValue(field, savedGravy)}`), reset);
+      await kit.link(GRAVY, 'Undo');
+
+      await kit.menu('Exit studio');
+      await sceneActive('Menu');
+      const label = await screenLabel(page);
+      check(`the owner's menu now shows "Balance v${next} · <date>"`, new RegExp(`^Balance v${next} · \\d{1,2} [A-Z][a-z]{2} \\d{4}$`).test(label ?? ''), label);
+      await shot('menu-saved');
+      check('no console errors (claude.ai, owner)', errors.length === 0, errors);
+      await context.close();
+    }
+
+    // A tester opens the link: no claude.ai runtime (not signed in), just the published page.
+    if (published) {
+      const { context, page, errors, G, wait, shot, sceneActive, shiftLength } = await open(
+        'published-tester',
+        { viewport: { width: 1600, height: 900 } },
+        { target: PAGE_URL, setup: hostSetup(host, null) },
+      );
+      const kit = studioKit(page);
+      const got = await page.evaluate(() => ({ claude: typeof window.claude, tuning: window.__COPPER__.tuning(), balance: window.__COPPER__.balance }));
+      check(
+        `a tester opening the link (no claude.ai runtime) gets balance version ${next} with its values and note`,
+        got.claude === 'undefined' && got.tuning.revision === next && got.tuning.note === NOTE && got.balance.shift.lengthSeconds === edits[SHIFT] && got.balance.sleepyCoworker.hushMoney === edits[HUSH],
+        { claude: got.claude, revision: got.tuning.revision, note: got.tuning.note, shift: got.balance.shift.lengthSeconds, hush: got.balance.sleepyCoworker.hushMoney },
+      );
+      const label = await screenLabel(page);
+      const buttons = await menuButtons(page);
+      check(`...their menu shows "Balance v${next}" to report, and no STUDIO`, (label ?? '').startsWith(`Balance v${next} · `) && !buttons.includes('STUDIO'), { label, buttons });
+      await shot('menu');
+      await page.keyboard.press('Enter');
+      await sceneActive('Game');
+      await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.3);
+      const run = await G(`return {
+        player: g.player.speed, wantPlayer: R.tilesPerSecond(${edits[DALTON]}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${edits[GRAVY]}) * T,
+        pile: g.world.fixtures.some((f) => f.def.id === 'abandoned_copper_pile' && tileOf(f).x === ${spot.x} && tileOf(f).y === ${spot.y}) };`);
+      const length = await shiftLength();
+      check(
+        '...and plays it: the saved speeds, shift length and map',
+        approx(run.player, run.wantPlayer) && approx(run.boss, run.wantBoss) && Math.abs(length - edits[SHIFT]) < 0.5 && run.pile,
+        { ...run, length },
+      );
+      await G(`calm(); put(g.player.body, { x: ${spot.x}, y: ${spot.y + 1} });`);
+      await wait(0.5);
+      await shot('shift');
+      await page.evaluate(() => (location.hash = '#studio'));
+      await kit.until(READY.studio);
+      await kit.until(() => document.querySelector('.cs-note[data-note="readonly"]') !== null);
+      await kit.tab('history');
+      const history = await page.evaluate(() => {
+        const first = document.querySelector('.cs-main .cs-hist');
+        return {
+          title: first?.querySelector('.cs-hist-ver')?.textContent,
+          live: first?.querySelector('.cs-badge')?.textContent ?? null,
+          note: first?.querySelector('.cs-hist-note')?.textContent,
+          changes: [...(first?.querySelectorAll('.cs-changes li') ?? [])].map((li) => li.textContent),
+          saveOff: document.querySelector('.cs-head .cs-btn.is-primary').disabled,
+        };
+      });
+      check(
+        `...#studio opens read-only for them, its History showing version ${next} with the note`,
+        history.title === `Version ${next}` && history.live === 'Live now' && history.note === NOTE && history.changes.includes('Map › edited') && history.saveOff,
+        history,
+      );
+      await shot('history');
+      check('no console errors (claude.ai, tester)', errors.length === 0, errors);
+      await context.close();
+    }
+
+    // A signed-in viewer who may not edit the page (claude.ai's canEdit() is false).
+    {
+      const { context, page, errors, shot, sceneActive } = await open(
+        'published-viewer',
+        { viewport: { width: 1280, height: 800 } },
+        { target: `${PAGE_URL}#studio`, setup: hostSetup(host, false), ready: 'studio' },
+      );
+      const kit = studioKit(page);
+      await kit.until(() => document.querySelector('.cs-note[data-note="readonly"]') !== null);
+      const save = await page.locator('.cs-head .cs-btn.is-primary').evaluate((b) => ({ disabled: b.disabled, title: b.title }));
+      const note = await page.locator('.cs-note[data-note="readonly"]').textContent();
+      check("a viewer who can't edit the page gets a read-only Studio: Save off, saying who can save", save.disabled && /owner/.test(save.title) && /Export/.test(note), { save, note });
+      await shot('studio');
+      await kit.menu('Exit studio');
+      await sceneActive('Menu');
+      check('...and no STUDIO on their menu', !(await menuButtons(page)).includes('STUDIO'), await menuButtons(page));
+      check('no console errors (claude.ai, viewer)', errors.length === 0, errors);
+      await context.close();
+    }
+
+    // ---- (e) the Studio on a phone held upright, with touch -------------------------------------------
+    {
+      const { context, page, errors, G, wait, shot, sceneActive, buttonPos } = await open(
+        'studio-phone',
+        { ...devices['iPhone 13'], deviceScaleFactor: 2, viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 } },
+        { target: PAGE_URL, setup: hostSetup(host, true) },
+      );
+      const kit = studioKit(page, { touch: true });
+      const offered = await kit.holds(() => window.__COPPER__.game.scene.getScene('Menu').children.list.some((o) => o.label?.text === 'STUDIO'), null, 60000);
+      await shot('menu');
+      if (offered) {
+        const at = await buttonPos('Menu', 'STUDIO');
+        await page.touchscreen.tap(at.x, at.y);
+      }
+      check('phone held upright: tapping STUDIO on the menu opens the Studio', offered && (await kit.holds(READY.studio, null, 90000)));
+      const coarse = await page.evaluate(() => matchMedia('(pointer: coarse)').matches);
+
+      for (const id of [...SECTIONS.map((s) => s.id), 'map', 'history']) {
+        await kit.tab(id);
+        if (id === 'map') await editorReady(kit, 90000);
+        const fit = await sideways(page);
+        const fits = fit.page <= 0 && fit.main <= 0 && fit.out.length === 0;
+        if (id === 'map') {
+          const placed = await page.evaluate(() => {
+            const a = window.__COPPER__.game.canvas.getBoundingClientRect();
+            const b = document.querySelector('.cs-maphost').getBoundingClientRect();
+            return [a.left - b.left, a.top - b.top, a.width - b.width, a.height - b.height].every((d) => Math.abs(d) <= 1) && a.right <= innerWidth + 1;
+          });
+          check('phone: the Map tab shows the map editor under the header, nothing sideways', fits && placed, fit);
+        } else if (id === 'history') {
+          check('phone: the History tab fits the screen', fits && (await page.locator('.cs-main .cs-hist').count()) > 0, fit);
+        } else {
+          const want = sectionFields(id).length;
+          const shown = await page.locator('.cs-main .cs-field').count();
+          check(`phone: the ${SECTIONS.find((s) => s.id === id).title} tab shows its ${want} settings with nothing sticking out sideways`, fits && shown === want, { fit, shown, want });
+        }
+        if (['crew', 'gravy', 'map', 'history'].includes(id)) await shot(id);
+      }
+
+      // Typing a value (with the phone's number pad).
+      const savedGravy = edits[GRAVY];
+      const phoneGravy = other(savedGravy, 1.25, 1.75);
+      await kit.tab('gravy');
+      await kit.type(GRAVY, phoneGravy);
+      check(`phone: typing ${phoneGravy} for Mr. Gravy's speed changes the draft`, (await draftValue(kit, GRAVY)) === phoneGravy && (await kit.unsaved()) === 1);
+
+      // A swipe that starts on a slider scrolls the page and never changes the value.
+      await kit.tab('loot');
+      const cdp = await context.newCDPSession(page);
+      const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y, id: 1 }] });
+      const drag = async (from, dx, dy, steps = 10) => {
+        await touch('touchStart', from.x, from.y);
+        for (let i = 1; i <= steps; i++) await touch('touchMove', from.x + (dx * i) / steps, from.y + (dy * i) / steps);
+        await touch('touchEnd');
+      };
+      const sliderAt = () =>
+        page.evaluate(() => {
+          // A slider in the middle of the screen, where a thumb starts scrolling.
+          const track = [...document.querySelectorAll('.cs-main .cs-track')].find((t) => {
+            const r = t.getBoundingClientRect();
+            return r.top > innerHeight * 0.35 && r.bottom < innerHeight * 0.75;
+          });
+          if (!track) return null;
+          const r = track.getBoundingClientRect();
+          const slider = track.querySelector('.cs-slider');
+          return {
+            path: track.closest('.cs-field').dataset.path,
+            x: r.left + r.width / 2,
+            y: r.top + r.height / 2,
+            left: r.left,
+            width: slider.getBoundingClientRect().width,
+            min: Number(slider.min),
+            max: Number(slider.max),
+            from: Number(slider.value),
+          };
+        });
+      const valuesBefore = JSON.stringify((await kit.snapshot()).draft.values);
+      const top0 = await page.locator('.cs-main').evaluate((m) => m.scrollTop);
+      const slider = await sliderAt();
+      if (slider) await drag(slider, 0, -320);
+      const scrolled = await kit.holds((top0) => document.querySelector('.cs-main').scrollTop > top0 + 100, top0, 10000);
+      check(
+        'phone: a swipe that starts on a slider scrolls the page and leaves the value alone',
+        coarse && slider !== null && scrolled && JSON.stringify((await kit.snapshot()).draft.values) === valuesBefore,
+        { coarse, slider, top: await page.locator('.cs-main').evaluate((m) => m.scrollTop) },
+      );
+      // ...while dragging sideways along one moves it, from where it was (towards the roomier end).
+      const across = await sliderAt();
+      const way = across && across.from > (across.min + across.max) / 2 ? -1 : 1;
+      if (across) await drag({ x: across.left + across.width * (way > 0 ? 0.3 : 0.7), y: across.y }, way * across.width * 0.25, 0);
+      const field = across && FIELD_BY_PATH.get(across.path);
+      const scale = field?.kind.percent ? 100 : 1;
+      const want = field && checkValue(field, Math.min(across.max, Math.max(across.min, across.from + way * 0.25 * (across.max - across.min))) / scale).value;
+      const moved = across !== null && (await kit.holds(([path, from]) => {
+        const slider = document.querySelector(`.cs-field[data-path="${path}"] .cs-slider`);
+        return Number(slider.value) !== from;
+      }, [across.path, across.from], 10000));
+      const got = across && (await draftValue(kit, across.path));
+      const step = field?.kind.step ?? 0;
+      check(
+        'phone: dragging sideways along a slider moves it, from where it was',
+        moved && typeof got === 'number' && Math.abs(got - want) <= step + 1e-9,
+        { across, got, want },
+      );
+      if (across) await kit.link(across.path, 'Undo');
+
+      // Play test with touch: the touch controls, the draft, and ◀ STUDIO.
+      await kit.tab('gravy');
+      await kit.press(page.locator('.cs-play .cs-btn'));
+      await sceneActive('Game');
+      await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.5 && window.__COPPER__.game.registry.get('hud:layout'), null, 180000);
+      const run = await G(`return { touch: h.touch, boss: g.boss.chaseSpeed, want: R.tilesPerSecond(${phoneGravy}) * T };`);
+      const back = await backButton(page);
+      check('phone: Play test runs the draft with the touch controls, ◀ STUDIO clear of the HUD', run.touch && approx(run.boss, run.want) && back.visible && back.hits.length === 0, { run, back });
+      await G('calm(); put(g.player.body, openRow(6));');
+      await wait(0.3);
+      const x0 = await G('return g.player.x;');
+      await touch('touchStart', 90, 600);
+      for (let i = 1; i <= 8; i++) await touch('touchMove', 90 + i * 10, 600);
+      await wait(1);
+      await shot('playtest');
+      await touch('touchEnd');
+      const x1 = await G('return g.player.x;');
+      check('...dragging the joystick walks Dalton', x1 - x0 > T, { x0, x1 });
+      await page.locator('.cs-back').tap();
+      await kit.until(() => window.__COPPER__.studio.isOpen, null, 60000);
+      check('phone: ◀ STUDIO comes back to the Studio, the draft kept', (await kit.unsaved()) === 1);
+      await kit.menu('Exit studio');
+      await sceneActive('Menu');
+      check('no console errors (studio, phone)', errors.length === 0, errors);
+      await context.close();
+    }
+  }
 }
 
 // ---- phone: touch controls ------------------------------------------------------------------
@@ -841,6 +1649,5 @@ if (runs('portrait')) {
 
 await browser.close();
 await server?.close();
-if (fontMissing) console.log('\nNote: Pixelify Sans could not be fetched, so the screenshots use the fallback font.');
 console.log(failed ? `\n${failed} check(s) failed` : '\nAll e2e checks passed. Screenshots in .smoke/');
 process.exit(failed ? 1 : 0);

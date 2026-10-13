@@ -110,6 +110,60 @@ export function changeLines(from: { values: Values; map: string | null }, to: { 
   return lines;
 }
 
+// ---- a newer version saved since the draft started --------------------------------------
+
+/** A saved version's values and map: 0 is the shipped values, older ones come from the history (null once dropped from it). */
+export function versionOf(file: TuningFile, revision: number): { values: Overrides; map: string | null } | null {
+  if (revision === file.revision) return { values: file.values, map: file.map };
+  if (revision === 0) return { values: {}, map: null };
+  const entry = file.history.find((h) => h.revision === revision);
+  return entry ? { values: entry.values, map: entry.map } : null;
+}
+
+/** The map in a "kept" or "clashes" list. */
+export const MAP_PATH = 'map';
+
+export interface Rebased {
+  draft: Draft;
+  /** The draft's own edits that still differ from the newer version (field paths, and MAP_PATH). */
+  kept: string[];
+  /** Kept edits to something the newer version changed too: the draft's value replaced theirs. */
+  clashes: string[];
+}
+
+/**
+ * Moves a draft started from an older version (`base`) onto the newer saved one, like a merge:
+ * whatever the draft didn't change takes the newer version's value, and the draft's own edits stay
+ * on top. Without this, a draft that was only looked at would undo the newer version when saved.
+ */
+export function rebaseDraft(draft: Draft, base: { values: Overrides; map: string | null }, saved: TuningFile, builtIn: string): Rebased {
+  const from = valuesWith(base.values);
+  const theirs = valuesWith(saved.values);
+  const mine = valuesWith(draft.values);
+  const out = valuesWith(saved.values) as unknown as JsonObject;
+  const kept: string[] = [];
+  const clashes: string[] = [];
+  for (const f of FIELDS) {
+    const was = getPath(from, f.path);
+    const now = getPath(mine, f.path);
+    const their = getPath(theirs, f.path);
+    if (same(now, was) || same(now, their)) continue;
+    kept.push(f.path);
+    if (!same(their, was)) clashes.push(f.path);
+    if (now === undefined || now === null) deletePath(out, f.path);
+    else setPath(out, f.path, now as Json);
+  }
+  let map = normalizeMap(saved.map, builtIn);
+  if (mapsDiffer(draft.map, base.map, builtIn) && mapsDiffer(draft.map, saved.map, builtIn)) {
+    kept.push(MAP_PATH);
+    // On the dev server a saved map becomes the built-in one, so the history says whether it changed.
+    const theirMap = mapsDiffer(saved.map, base.map, builtIn) || saved.history.some((h) => h.revision > draft.baseRevision && h.changes.some((c) => c.startsWith('Map ›')));
+    if (theirMap) clashes.push(MAP_PATH);
+    map = draft.map;
+  }
+  return { draft: { ...draft, values: diffValues(out), map, baseRevision: saved.revision }, kept, clashes };
+}
+
 // ---- keeping the draft between visits ------------------------------------------------------
 
 export const DRAFT_KEY = 'project-copper/studio/draft/v1';
@@ -145,6 +199,11 @@ export function clearDraft(store: KeyValue | null): void {
 export const SESSION_KEY = 'project-copper/studio/session/v1';
 /** A stash older than this (a tab restored hours later) doesn't reopen the Studio. */
 export const SESSION_MAX_AGE_MS = 30 * 60 * 1000;
+/**
+ * After the first page load reads the stash, it still counts for a reload this soon after: a dev
+ * server save that wrote the map reloads the page twice (the Studio's reload, then Vite's own).
+ */
+export const SESSION_RELOAD_MS = 10_000;
 
 export interface StudioSession {
   /** The tab that was open: a section id, 'map' or 'history'. */
@@ -163,11 +222,27 @@ export function stashSession(store: KeyValue | null, session: StudioSession): bo
   return writeJson(store, SESSION_KEY, session);
 }
 
-/** Reads the stash once (it is removed), or null when there is none or it is too old. */
+/** Forgets the stash (the Studio was closed, or the save it was for failed). */
+export function clearSession(store: KeyValue | null): void {
+  removeKey(store, SESSION_KEY);
+}
+
+/**
+ * The stash left for this page load, or null when there is none or it is too old. It is used up:
+ * only a reload within {@link SESSION_RELOAD_MS} of the first read finds it again.
+ */
 export function takeSession(store: KeyValue | null, now: number): StudioSession | null {
   const raw = readJson(store, SESSION_KEY);
-  removeKey(store, SESSION_KEY);
-  if (!isObject(raw) || typeof raw.at !== 'number' || now - raw.at > SESSION_MAX_AGE_MS || now < raw.at - 60_000) return null;
+  if (!isObject(raw) || typeof raw.at !== 'number' || now - raw.at > SESSION_MAX_AGE_MS || now < raw.at - 60_000) {
+    removeKey(store, SESSION_KEY);
+    return null;
+  }
+  if (typeof raw.takenAt === 'number') {
+    if (now - raw.takenAt > SESSION_RELOAD_MS || now < raw.takenAt) {
+      removeKey(store, SESSION_KEY);
+      return null;
+    }
+  } else if (!writeJson(store, SESSION_KEY, { ...raw, takenAt: now })) removeKey(store, SESSION_KEY);
   const saving = isObject(raw.saving) && typeof raw.saving.revision === 'number' ? { revision: raw.saving.revision, target: String(raw.saving.target ?? '') } : undefined;
   return {
     tab: typeof raw.tab === 'string' ? raw.tab : '',

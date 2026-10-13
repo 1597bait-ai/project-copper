@@ -13,7 +13,7 @@ import { NPCS } from '../config/npcs';
 import { hasTileArt, paintTileFrame } from '../art/tiles';
 import { TILE_FRAMES, iconFrame } from './autotile';
 import { DECOR_CHARS, FIXTURE_CHARS, TILES } from './legend';
-import { parseMap, serializeMap } from './mapText';
+import { mapNotes, parseMap, serializeMap } from './mapText';
 import { MAPS } from './maps';
 import { validateMap, walkGrid } from './validate';
 
@@ -74,6 +74,12 @@ for (const entry of MAPS) {
       const again = parseMap(serializeMap(map.rows, map.names));
       expect(again.rows).toEqual(map.rows);
       expect(again.rooms.map((r) => r.name)).toEqual(map.rooms.map((r) => r.name));
+    });
+
+    it('keeps its own notes when the map editor writes it back (Copper Studio saves into this file)', () => {
+      const written = serializeMap(map.rows, map.names, mapNotes(entry.text));
+      expect(mapNotes(written)).toEqual(mapNotes(entry.text));
+      expect(parseMap(written).rows).toEqual(map.rows);
     });
 
     it('pays more the deeper you go (walking distance from the van vs price per unit)', () => {

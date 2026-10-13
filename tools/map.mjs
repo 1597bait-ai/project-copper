@@ -14,8 +14,7 @@ const dir = new URL('../src/assets/maps/', import.meta.url).pathname;
 const paths = files.length ? files : (await readdir(dir)).filter((f) => f.endsWith('.txt')).map((f) => join(dir, f));
 
 const vite = await createServer({ server: { middlewareMode: true }, appType: 'custom', logLevel: 'silent' });
-const { parseMap, serializeMap, legendComment } = await vite.ssrLoadModule('/src/world/mapText.ts');
-const legendLines = new Set(legendComment().split('\n'));
+const { parseMap, serializeMap, mapNotes } = await vite.ssrLoadModule('/src/world/mapText.ts');
 const { validateMap, walkGrid } = await vite.ssrLoadModule('/src/world/validate.ts');
 const { FIXTURES } = await vite.ssrLoadModule('/src/config/fixtures.ts');
 const { MATERIALS } = await vite.ssrLoadModule('/src/config/materials.ts');
@@ -70,15 +69,8 @@ for (const path of paths) {
       // Rewriting would turn typos into hallway floor: fix them first.
       console.log(`NOT formatted ${path}: fix the problems below first`);
     } else {
-      const notes = text
-        .replace(/^\uFEFF/, '')
-        .replace(/\r/g, '')
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.startsWith('//') && !legendLines.has(l));
-      const legend = legendComment();
-      const out = serializeMap(map.rows, map.names).replace(legend, notes.length ? `${legend}\n//\n${notes.join('\n')}` : legend);
-      await writeFile(path, out);
+      // The map's own notes are kept (the map editor keeps them the same way).
+      await writeFile(path, serializeMap(map.rows, map.names, mapNotes(text)));
       console.log(`formatted ${path}`);
     }
   }
