@@ -255,7 +255,9 @@ async function open(name, contextOptions, { target = url, setup = null, ready = 
       .catch(() => undefined);
     await page.screenshot({ path: `${OUT}/${name}-${file}.png` });
   };
-  const sceneActive = (key) => page.waitForFunction((k) => window.__COPPER__.game.scene.isActive(k), key, { timeout: 30000 });
+  // Generous: a scene change waits on fades and a whole new screen, and a slow CI runner draws a
+  // phone held upright at well under one frame a second (the shift's end once took over 30 s).
+  const sceneActive = (key) => page.waitForFunction((k) => window.__COPPER__.game.scene.isActive(k), key, { timeout: 120000 });
 
   /** Screen position (CSS px) of a world point seen through a scene's camera. */
   const toScreen = (sceneKey, wx, wy, cam = 'main') =>
