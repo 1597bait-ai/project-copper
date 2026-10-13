@@ -64,8 +64,23 @@ export function openDialog(parent: HTMLElement, opts: { title: string; body: Chi
     body,
     h('div', { class: 'cs-dialog-foot' }, buttons),
   );
-  const root = h('div', { class: 'cs-layer' }, box);
+  // Focusable, so a click on the dialog's text (or around it) keeps the focus inside the Studio
+  // instead of dropping it on the page, where keys would reach the game and the map editor.
+  const root = h('div', { class: 'cs-layer', tabindex: -1 }, box);
   const disabledBefore = new Map<HTMLButtonElement, boolean>();
+
+  /** The newest dialog is the one keys go to. */
+  const onTop = () => [...parent.querySelectorAll(':scope > .cs-layer')].pop() === root;
+  // Keys pressed with the focus outside the Studio anyway (the page itself) are the dialog's too: they
+  // never reach the game or the map editor behind it. (Keys inside the Studio never get this far.)
+  const stray = (e: KeyboardEvent) => {
+    if (closed || !onTop()) return;
+    e.stopPropagation();
+    if (e.key === 'Escape' && !busy) {
+      e.preventDefault();
+      dialog.close();
+    } else root.focus({ preventScroll: true });
+  };
 
   const dialog: Dialog = {
     root,
@@ -74,6 +89,7 @@ export function openDialog(parent: HTMLElement, opts: { title: string; body: Chi
     close() {
       if (closed) return;
       closed = true;
+      document.removeEventListener('keydown', stray);
       root.remove();
       opts.onClose?.();
       if (before?.isConnected) before.focus();
@@ -111,6 +127,7 @@ export function openDialog(parent: HTMLElement, opts: { title: string; body: Chi
     }
   });
   parent.append(root);
+  document.addEventListener('keydown', stray);
   const start = box.querySelector<HTMLElement>('textarea:not([readonly]), input:not([type=checkbox]), select') ?? buttons.find((b) => !b.disabled && b.classList.contains('is-primary')) ?? buttons[0];
   start?.focus({ preventScroll: true });
   return dialog;

@@ -30,6 +30,8 @@ export interface EditorLink {
   onChange(text: string): void;
   /** PLAY, once the map has no problems: the Studio's play test. */
   onPlay(): void;
+  /** True while the Studio has a dialog or menu up over the map: keys and presses aren't the editor's then. */
+  isBlocked?(): boolean;
 }
 
 /** A second-or-so pause in painting before the Studio hears about it. */
@@ -1278,7 +1280,7 @@ export class EditorScene extends Phaser.Scene {
 
   private onDown(p: Pointer) {
     unlockAudio();
-    if (this.overlay) return;
+    if (this.overlay || this.link.isBlocked?.()) return;
     if (p.wasTouch && !this.touch) {
       this.touch = true;
       this.layout();
@@ -1471,7 +1473,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   private onWheel(p: Pointer, _over: unknown, dx: number, dy: number) {
-    if (this.overlay) return;
+    if (this.overlay || this.link.isBlocked?.()) return;
     const region = this.regionAt(p.x, p.y);
     if (region === 'palette') {
       const d = this.palVertical || Math.abs(dy) > Math.abs(dx) ? dy : dx;
@@ -1736,7 +1738,7 @@ export class EditorScene extends Phaser.Scene {
   // ---- keyboard ----------------------------------------------------------------------
 
   private onKeyDown = (e: KeyboardEvent) => {
-    if (this.overlay || !this.alive || !this.scene.isActive() || isTypingTarget(e.target)) return;
+    if (this.overlay || !this.alive || !this.scene.isActive() || isTypingTarget(e.target) || this.link.isBlocked?.()) return;
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     if (mod && key === 'z') {

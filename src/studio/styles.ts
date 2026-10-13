@@ -70,6 +70,9 @@ const CSS = `
 
 /* ---- the More menu */
 .cs-menuwrap { position: relative; }
+/* Under the open menu, over everything else: a press outside only closes the menu (on the Map tab it
+   would otherwise paint the map too). */
+.cs-shield { position: fixed; inset: 0; z-index: 5; }
 .cs-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 6; min-width: 290px; max-width: calc(100vw - 24px); display: flex; flex-direction: column;
   padding: 6px; border: 1px solid var(--line2); border-radius: 10px; background: var(--panel); box-shadow: 0 14px 36px rgba(0,0,0,.55); }
 .cs-menu button { appearance: none; display: block; width: 100%; min-height: 42px; padding: 9px 12px; border: 0; border-radius: 6px; background: none; color: var(--text); font: 15px/1.3 var(--body); text-align: left; cursor: pointer; }
@@ -179,6 +182,7 @@ const CSS = `
 
 /* ---- dialogs and toasts */
 .cs-layer { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(6,7,10,.74); pointer-events: auto; }
+.cs-layer:focus { outline: none; }
 .cs-dialog { display: flex; flex-direction: column; width: min(660px, 100%); max-height: 100%; border: 1px solid var(--line2); border-top: 3px solid var(--copper); border-radius: 12px; background: var(--panel); box-shadow: 0 24px 64px rgba(0,0,0,.6); }
 .cs-dialog-head { padding: 16px 20px 6px; }
 .cs-dialog-head h2 { font: 800 20px/1.25 var(--head); letter-spacing: .005em; color: var(--text); }

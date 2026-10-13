@@ -24,12 +24,16 @@ import {
   changedPaths,
   clearSession,
   countBySection,
+  DRAFT_KEY,
   draftFrom,
   loadDraft,
   MAP_PATH,
   mapsDiffer,
+  mergeDrafts,
   normalizeMap,
   rebaseDraft,
+  sameDraft,
+  saveLanded,
   stashSession,
   storeDraft,
   takeLegacyEditorMap,
@@ -68,8 +72,8 @@ function when(iso: string | null | undefined): string {
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-/** What went wrong with a save, in plain English (save.ts words its errors for people already). */
-function saveErrorText(e: SaveError): string {
+/** What went wrong with a save, in plain English (save.ts words its errors for people already). `kept`: the draft is stored in this browser. */
+function saveErrorText(e: SaveError, kept: boolean): string {
   const fallback: Record<SaveError['code'], string> = {
     conflict: 'Someone saved a newer version first. The page is reloading to it.',
     not_writer: 'Only the game’s owner (or an editor) can save it.',
@@ -80,8 +84,12 @@ function saveErrorText(e: SaveError): string {
     failed: 'The save didn’t go through.',
   };
   const text = e.message.trim() || fallback[e.code];
-  return e.code === 'conflict' ? `${text} Your draft is kept.` : text;
+  if (e.code !== 'conflict') return text;
+  return `${text} ${kept ? 'Your draft is kept.' : 'This browser can’t keep your draft (its storage is blocked), so these changes are lost when it reloads.'}`;
 }
+
+/** Warns before saving when the draft can't be kept: a refused save reloads the page, and the changes would go with it. */
+const UNKEPT_WARNING = 'This browser can’t keep the draft (its storage is blocked). If someone saved a newer version first, the page reloads to it and these changes are lost: Export them first to be safe.';
 
 export class Studio {
   // ---- what is being edited
@@ -105,6 +113,12 @@ export class Studio {
   private readonly moreOpen = new Set<string>();
   private persistTimer = 0;
   private storageWarned = false;
+  /** The draft as this tab last read it from the browser's storage or wrote it there (null: nothing stored). */
+  private stored: Draft | null = null;
+  /** The draft changed since this tab last stored it. */
+  private dirty = false;
+  /** ▶ Play was pressed before the art was drawn: the play test starts once it is. */
+  private playQueued = false;
   private mapChecked: { text: string; errors: string[] } | null = null;
 
   // ---- elements (made on first open)
@@ -120,7 +134,7 @@ export class Studio {
   private saveButton!: HTMLButtonElement;
   private moreButton!: HTMLButtonElement;
   private menu!: HTMLElement;
-  private menuWrap!: HTMLElement;
+  private menuShield!: HTMLElement;
   private readonly tabs = new Map<string, { button: HTMLButtonElement; count: HTMLElement }>();
 
   constructor(
@@ -217,6 +231,19 @@ export class Studio {
   /** Plays the draft: applies it to the game and starts a shift with the chosen crew member. */
   playTest(): void {
     if (this.state !== 'open') return;
+    // The page can load straight into the Studio (after every save) while the art is still being
+    // drawn: a shift started now would show missing-texture boxes until the end.
+    if (!this.stage.artReady) {
+      if (!this.playQueued) {
+        this.playQueued = true;
+        this.toast('Drawing the school… the play test starts in a moment.');
+        this.stage.whenArtReady(() => {
+          this.playQueued = false;
+          this.playTest();
+        });
+      }
+      return;
+    }
     this.stage.editor?.flush();
     const problem = this.mapErrors()[0];
     if (problem) {
@@ -252,6 +279,7 @@ export class Studio {
     this.started = true;
     const store = localStore();
     const stored = loadDraft(store, BUILT_IN);
+    this.stored = stored;
     const notes: [string, NoteKind, string, NoteAction[]][] = [];
     if (stored) this.draft = stored;
     else {
@@ -269,17 +297,24 @@ export class Studio {
     const session = this.session;
     this.session = null;
     if (session?.tab && this.isTab(session.tab)) this.tab = session.tab;
-    if (session?.saving) {
+    const saving = session?.saving;
+    if (saving) {
       const rev = this.saved.revision;
-      if (rev >= session.saving.revision) {
+      // Also after a "newer version" refusal: that version can be this save, when the answer to its
+      // first try got lost on the way back.
+      if (saveLanded(this.saved, saving)) {
         const where =
-          session.saving.target === 'dev'
+          saving.target === 'dev'
             ? 'It is in src/config/tuning.json (and the map file): commit them to keep it.'
             : 'Everyone who opens the game gets it now.';
-        notes.push(['saved', 'good', `Saved as version ${rev}. ${where}`, []]);
+        notes.push(['saved', 'good', `Saved as version ${saving.revision}. ${where}`, []]);
+        // The draft is what was saved (plus any edits since): it starts from that version now.
+        if (this.draft.baseRevision < saving.revision) this.draft = { ...this.draft, baseRevision: saving.revision };
         if (this.unsavedCount() === 0) this.draft = { ...this.draft, baseRevision: rev, note: '' };
-      } else {
-        notes.push(['saved', 'bad', `The save didn't arrive: the game is still on version ${rev}. Your draft is kept, so you can save again.`, []]);
+      } else if (!session.conflict) {
+        notes.push(['saved', 'bad', `The save didn't arrive: the game is still on version ${rev}.${stored ? ' Your draft is kept, so you can save again.' : ''}`, []]);
+      } else if (!stored) {
+        notes.push(['saved', 'bad', `Someone saved version ${rev} first, and this browser couldn't keep your draft (its storage is blocked).`, []]);
       }
     }
     // The draft started from another version than the game runs now: someone saved since (in
@@ -315,6 +350,7 @@ export class Studio {
       }
     }
     for (const n of notes) this.note(...n);
+    this.dirty = !stored || !sameDraft(stored, this.draft, BUILT_IN);
     this.persistNow();
 
     saveEnv().then((env) => {
@@ -338,6 +374,7 @@ export class Studio {
 
   private acceptBase(): void {
     this.draft = { ...this.draft, baseRevision: this.saved.revision };
+    this.dirty = true;
     this.persistNow();
     this.dropNote('newer');
   }
@@ -384,13 +421,18 @@ export class Studio {
       item('Exit studio', 'Back to the game (the draft is kept)', () => this.exit()),
     );
     this.menu.addEventListener('keydown', (e) => this.menuKeys(e));
-    this.menuWrap = h('div', { class: 'cs-menuwrap' }, this.moreButton, this.menu);
+    this.menuShield = h('div', { class: 'cs-shield', hidden: true, 'aria-hidden': 'true' });
+    this.menuShield.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      this.toggleMenu(false);
+    });
+    const menuWrap = h('div', { class: 'cs-menuwrap' }, this.moreButton, this.menu);
     const head = h(
       'header',
       { class: 'cs-head' },
       h('div', { class: 'cs-brand' }, h('span', { class: 'cs-logo' }, 'COPPER STUDIO'), this.versionChip, this.dirtyChip),
       // Save and the menu stay together: on the narrowest phones they wrap to a row of their own.
-      h('div', { class: 'cs-actions' }, h('div', { class: 'cs-play' }, this.crewSelect, play), h('div', { class: 'cs-saveset' }, this.saveButton, this.menuWrap)),
+      h('div', { class: 'cs-actions' }, h('div', { class: 'cs-play' }, this.crewSelect, play), h('div', { class: 'cs-saveset' }, this.saveButton, menuWrap)),
     );
 
     this.search = h('input', { type: 'search', class: 'cs-search', placeholder: 'Search settings…', 'aria-label': 'Search settings', autocomplete: 'off', spellcheck: 'false', enterkeyhint: 'search' });
@@ -422,7 +464,7 @@ export class Studio {
     this.main = h('main', { class: 'cs-main' });
     this.mapHost = h('div', { class: 'cs-maphost' }, h('p', null, 'Drawing the school…'));
     this.toasts = h('div', { class: 'cs-toasts', role: 'status', 'aria-live': 'polite' });
-    this.root = h('div', { class: 'cs', hidden: true, 'aria-label': 'Copper Studio' }, head, this.notes, nav, this.main, this.mapHost, this.toasts);
+    this.root = h('div', { class: 'cs', hidden: true, 'aria-label': 'Copper Studio' }, head, this.notes, nav, this.main, this.mapHost, this.menuShield, this.toasts);
     // Keys pressed in the Studio are the Studio's: the game and the map editor never see them.
     for (const type of ['keydown', 'keyup', 'keypress']) this.root.addEventListener(type, (e) => e.stopPropagation());
     document.body.append(this.root);
@@ -434,6 +476,10 @@ export class Studio {
     new ResizeObserver(refit).observe(this.mapHost);
     window.addEventListener('resize', refit);
     window.addEventListener('pagehide', () => this.persistNow());
+    // Another tab of the game stored the draft (the chat's preview and the shared link, say).
+    window.addEventListener('storage', (e) => {
+      if (this.started && e.key === DRAFT_KEY) this.takeOtherTabs();
+    });
   }
 
   // ---- the draft ------------------------------------------------------------------------------
@@ -469,6 +515,7 @@ export class Studio {
   /** The draft changed. `wholesale`: not from a field on the page (the fields start over, notes and all). */
   private changed(wholesale = false): void {
     this.draftValues = valuesWith(this.draft.values);
+    this.dirty = true;
     this.persistSoon();
     this.refresh(wholesale);
   }
@@ -478,13 +525,47 @@ export class Studio {
     this.persistTimer = window.setTimeout(() => this.persistNow(), 300);
   }
 
-  private persistNow(): void {
+  /**
+   * Stores the draft in this browser when it changed, after taking in what another tab stored
+   * meanwhile (so neither tab's edits are lost). False when the browser won't keep it.
+   */
+  private persistNow(): boolean {
     clearTimeout(this.persistTimer);
-    if (!this.started) return;
-    if (!storeDraft(localStore(), this.draft, new Date().toISOString()) && !this.storageWarned) {
-      this.storageWarned = true;
-      this.note('storage', 'warn', 'This browser won’t keep the draft between visits (its storage is blocked). Save or Export before you close the page.', []);
+    if (!this.started) return false;
+    if (!this.dirty) return this.stored !== null;
+    const store = localStore();
+    this.takeOtherTabs(store);
+    if (!storeDraft(store, this.draft, new Date().toISOString())) {
+      if (!this.storageWarned) {
+        this.storageWarned = true;
+        this.note('storage', 'warn', 'This browser won’t keep the draft between visits (its storage is blocked). Save or Export before you close the page.', []);
+      }
+      return false;
     }
+    this.stored = this.draft;
+    this.dirty = false;
+    return true;
+  }
+
+  /** Another tab stored the draft since this one last read or wrote it: their edits come in, this tab's stay on top. */
+  private takeOtherTabs(store = localStore()): void {
+    const theirs = loadDraft(store, BUILT_IN);
+    if (!theirs || (this.stored && sameDraft(theirs, this.stored, BUILT_IN))) return;
+    // The map editor's latest strokes belong to this tab's edits.
+    this.stage.editor?.flush();
+    const merged = mergeDrafts(this.stored ?? draftFrom(this.saved, BUILT_IN), this.draft, theirs, BUILT_IN);
+    this.stored = theirs;
+    this.dirty = !sameDraft(merged, theirs, BUILT_IN);
+    if (sameDraft(merged, this.draft, BUILT_IN)) return;
+    const mapBefore = this.draft.map;
+    this.draft = merged;
+    this.draftValues = valuesWith(merged.values);
+    // Not wholesale: a box being typed in keeps what is typed (its value is this tab's, so it stays).
+    this.refresh();
+    const editor = this.stage.editor;
+    if (editor && mapsDiffer(mapBefore, merged.map, BUILT_IN)) editor.loadMap(merged.map ?? BUILT_IN, 'Another tab changed the map. UNDO brings this one back.');
+    this.note('tabs', 'info', 'This draft was changed in another tab too: its edits are in here now, and yours are kept.', []);
+    if (this.dirty) this.persistSoon();
   }
 
   private unsavedCount(): number {
@@ -495,9 +576,8 @@ export class Studio {
     return mapsDiffer(this.draft.map, this.saved.map, BUILT_IN);
   }
 
-  /** What stops the draft's map from being played or saved. */
-  private mapErrors(): string[] {
-    const text = this.draft.map;
+  /** What stops the draft's map (or `text`) from being played or saved. */
+  private mapErrors(text = this.draft.map): string[] {
     if (text === null) return [];
     if (this.mapChecked?.text !== text) this.mapChecked = { text, errors: validateMap(parseMap(text)).errors };
     return this.mapChecked.errors;
@@ -623,6 +703,7 @@ export class Studio {
       onChange: (text) => this.setMap(text),
       // Asked from inside the editor's input handling: switch scenes once that is done.
       onPlay: () => setTimeout(() => this.playTest(), 0),
+      isBlocked: () => this.covered,
     };
   }
 
@@ -795,20 +876,19 @@ export class Studio {
 
   private toggleMenu(open = this.menu.hidden): void {
     this.menu.hidden = !open;
+    this.menuShield.hidden = !open;
     this.moreButton.setAttribute('aria-expanded', String(open));
-    if (open) {
-      document.addEventListener('pointerdown', this.outsideMenu, true);
-      this.menu.querySelector('button')?.focus();
-    } else document.removeEventListener('pointerdown', this.outsideMenu, true);
+    if (open) this.menu.querySelector('button')?.focus();
   }
 
   private closeMenu(): void {
     if (this.menu && !this.menu.hidden) this.toggleMenu(false);
   }
 
-  private outsideMenu = (e: PointerEvent) => {
-    if (!this.menuWrap.contains(e.target as Node)) this.toggleMenu(false);
-  };
+  /** A dialog or the ⋯ menu is up: the map editor behind it leaves keys and presses alone. */
+  private get covered(): boolean {
+    return (this.menu && !this.menu.hidden) || this.root?.querySelector(':scope > .cs-layer') != null;
+  }
 
   private menuKeys(e: KeyboardEvent): void {
     const items = [...this.menu.querySelectorAll('button')];

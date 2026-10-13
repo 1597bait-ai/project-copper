@@ -164,6 +164,41 @@ export function rebaseDraft(draft: Draft, base: { values: Overrides; map: string
   return { draft: { ...draft, values: diffValues(out), map, baseRevision: saved.revision }, kept, clashes };
 }
 
+// ---- two tabs, one stored draft --------------------------------------------------------------
+
+/** True when two drafts hold the same values, map, note and base version. */
+export function sameDraft(a: Draft, b: Draft, builtIn: string): boolean {
+  return (
+    a.note === b.note &&
+    a.baseRevision === b.baseRevision &&
+    !mapsDiffer(a.map, b.map, builtIn) &&
+    changedPaths(valuesWith(a.values), valuesWith(b.values)).length === 0
+  );
+}
+
+/**
+ * Every tab of the game keeps the same draft in the browser. When another tab stored it since this
+ * one last read or wrote it (`base`), this is their draft with this tab's own edits on top (like
+ * rebaseDraft): neither tab's edits are lost, and where both changed the same thing this tab's stays.
+ */
+export function mergeDrafts(base: Draft, mine: Draft, theirs: Draft, builtIn: string): Draft {
+  const was = valuesWith(base.values);
+  const now = valuesWith(mine.values);
+  const out = valuesWith(theirs.values) as unknown as JsonObject;
+  for (const f of FIELDS) {
+    const value = getPath(now, f.path);
+    if (same(value, getPath(was, f.path))) continue;
+    if (value === undefined || value === null) deletePath(out, f.path);
+    else setPath(out, f.path, value as Json);
+  }
+  return {
+    values: diffValues(out),
+    map: mapsDiffer(mine.map, base.map, builtIn) ? mine.map : theirs.map,
+    note: mine.note !== base.note ? mine.note : theirs.note,
+    baseRevision: mine.baseRevision !== base.baseRevision ? mine.baseRevision : theirs.baseRevision,
+  };
+}
+
 // ---- keeping the draft between visits ------------------------------------------------------
 
 export const DRAFT_KEY = 'project-copper/studio/draft/v1';
@@ -210,12 +245,22 @@ export interface StudioSession {
   tab: string;
   /** The crew member picked for play tests. */
   crew: string;
-  /** Set when the page reloads because of a save: the version it wrote, and where. */
-  saving?: { revision: number; target: string };
-  /** The save was refused: someone saved a newer version first. */
+  /** Set when the page reloads because of a save: the version it wrote, where, and its time (which tells it apart from anyone else's). */
+  saving?: { revision: number; target: string; savedAt?: string };
+  /** The save was refused: a newer version was saved first (by someone else, or by this save itself when its answer got lost). */
   conflict?: boolean;
   /** Date.now() when stashed. */
   at: number;
+}
+
+/**
+ * Whether the save stashed in `saving` is in `file` (the version the page loaded): a version with
+ * its number and its time, to the millisecond. A stash without a time: any version that new.
+ */
+export function saveLanded(file: TuningFile, saving: { revision: number; savedAt?: string }): boolean {
+  if (!saving.savedAt) return file.revision >= saving.revision;
+  const save = saving.revision === file.revision ? file : file.history.find((h) => h.revision === saving.revision);
+  return save?.savedAt === saving.savedAt;
 }
 
 export function stashSession(store: KeyValue | null, session: StudioSession): boolean {
@@ -243,7 +288,10 @@ export function takeSession(store: KeyValue | null, now: number): StudioSession 
       return null;
     }
   } else if (!writeJson(store, SESSION_KEY, { ...raw, takenAt: now })) removeKey(store, SESSION_KEY);
-  const saving = isObject(raw.saving) && typeof raw.saving.revision === 'number' ? { revision: raw.saving.revision, target: String(raw.saving.target ?? '') } : undefined;
+  const saving =
+    isObject(raw.saving) && typeof raw.saving.revision === 'number'
+      ? { revision: raw.saving.revision, target: String(raw.saving.target ?? ''), ...(typeof raw.saving.savedAt === 'string' ? { savedAt: raw.saving.savedAt } : {}) }
+      : undefined;
   return {
     tab: typeof raw.tab === 'string' ? raw.tab : '',
     crew: typeof raw.crew === 'string' ? raw.crew : '',
