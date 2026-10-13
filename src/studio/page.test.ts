@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   ARTIFACT_HEAD,
   ARTIFACT_TAIL,
+  HOST_RESET,
   PAGE_CAPABILITIES,
   buildArtifactDocument,
   buildPageContent,
   embedJson,
+  hostHead,
   inlineScriptProblem,
   parsePage,
   readLivePage,
@@ -57,6 +59,16 @@ describe('the game page', () => {
     expect(inlineScriptProblem('a="<!--";b="<scripts>";')).toBeNull();
   });
 
+  it('reads the host skeleton\'s reset back, so a republish keeps the skeleton it came in', () => {
+    const reset = 'body{margin:0;background:#123}';
+    const doc = wrapInHost(buildPageContent(parts), reset);
+    expect(doc.startsWith(hostHead(reset))).toBe(true);
+    expect(parsePage(doc)?.hostReset).toBe(reset);
+    expect(buildArtifactDocument(parsePage(doc)!)).toBe(doc);
+    expect(parsePage(buildPageContent(parts))?.hostReset).toBeUndefined();
+    expect(() => buildArtifactDocument({ ...parts, hostReset: 'x</style><script>' })).toThrow();
+  });
+
   it('is not fooled by a page without the parts', () => {
     expect(parsePage('<html><body>hello</body></html>')).toBeNull();
   });
@@ -76,11 +88,15 @@ describe('the live page', () => {
   const live = parsePage(buildArtifactDocument(parts))!;
   const head = { nodeName: 'HEAD' };
   const body = { nodeName: 'BODY' };
-  const element = (tagName: string, textContent: string, parentNode: object = body) => ({ tagName, textContent, parentNode });
+  const element = (tagName: string, textContent: string, parentNode: object = body, id = '') => ({ tagName, textContent, parentNode, id });
   type FakeElement = ReturnType<typeof element>;
-  /** Just the DOM calls readLivePage makes. */
-  const fakeDocument = (byId: Record<string, FakeElement>, titles: FakeElement[]) =>
-    ({ getElementById: (id: string) => byId[id] ?? null, getElementsByTagName: (tag: string) => (tag === 'title' ? titles : []) }) as unknown as Document;
+  /** Just the DOM calls readLivePage makes; `headStyles` are the <style> elements in <head>. */
+  const fakeDocument = (byId: Record<string, FakeElement>, titles: FakeElement[], headStyles: FakeElement[] = [element('STYLE', HOST_RESET, head)]) =>
+    ({
+      getElementById: (id: string) => byId[id] ?? null,
+      getElementsByTagName: (tag: string) => (tag === 'title' ? titles : []),
+      head: { getElementsByTagName: (tag: string) => (tag === 'style' ? headStyles : []) },
+    }) as unknown as Document;
   const page = (extra: Record<string, FakeElement> = {}) => ({
     'copper-style': element('STYLE', live.style),
     'copper-tuning': element('SCRIPT', live.tuning),
@@ -93,6 +109,18 @@ describe('the live page', () => {
     expect(read).toEqual(live);
     expect(buildArtifactDocument(read!)).toBe(buildArtifactDocument(parts));
     expect(buildArtifactDocument(parts)).toBe(wrapInHost(buildPageContent(parts)));
+  });
+
+  it('republishes in the skeleton it was served in, even after the host changes its reset', () => {
+    const reset = HOST_RESET.replace('background:#fff;color:#000', 'background:#faf9f5;color:#141413');
+    const injected = element('STYLE', '.host-ui{display:none}', head, 'host-ui');
+    const read = readLivePage(fakeDocument(page(), [element('TITLE', live.title)], [injected, element('STYLE', reset, head)]));
+    expect(read?.hostReset).toBe(reset);
+    expect(buildArtifactDocument(read!)).toBe(wrapInHost(buildPageContent(parts), reset));
+    // No reset to copy (a host that serves the page differently): the skeleton the tool publishes.
+    const bare = readLivePage(fakeDocument(page(), [element('TITLE', live.title)], []));
+    expect(bare?.hostReset).toBeUndefined();
+    expect(buildArtifactDocument(bare!)).toBe(buildArtifactDocument(parts));
   });
 
   it('is null for a page published before Copper Studio could save into it', () => {

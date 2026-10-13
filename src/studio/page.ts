@@ -5,14 +5,22 @@
 // No imports, so tools/artifact-page.mjs (Node) can use the same functions as the game. Keep it
 // that way: the tool and the page must build byte-for-byte the same structure.
 
-/** The document skeleton the artifact host wraps around a published page (and expects a page to send back). */
-export const ARTIFACT_HEAD =
-  '<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>' +
+/**
+ * The small reset the artifact host puts in the skeleton's <head> (as it was when this was written;
+ * the host has changed it before, so a page that republishes itself copies the one it was served
+ * in: see readLivePage).
+ */
+export const HOST_RESET =
   ':root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}' +
   'html{scroll-padding-top:env(safe-area-inset-top,0px)}' +
-  'body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}' +
-  'img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}' +
-  '</style></head><body>';
+  'body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}' +
+  'img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}';
+
+/** The start of the document skeleton the artifact host wraps around a published page (and expects a page to send back). */
+export function hostHead(reset: string = HOST_RESET): string {
+  return `<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${reset}</style></head><body>`;
+}
+export const ARTIFACT_HEAD = hostHead();
 export const ARTIFACT_TAIL = '</body></html>';
 
 /** Element ids the page is built from. */
@@ -32,6 +40,8 @@ export interface PageParts {
   tuning: string;
   /** The whole game, as one ES module (without the <script> tag). */
   script: string;
+  /** The reset in the host skeleton this page came in, when it came in one (HOST_RESET otherwise). */
+  hostReset?: string;
 }
 
 const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -79,13 +89,14 @@ export function buildPageContent(parts: PageParts): string {
 }
 
 /** The document a viewer gets for published page content: the host's skeleton around it. */
-export function wrapInHost(content: string): string {
-  return `${ARTIFACT_HEAD}\n${content}\n${ARTIFACT_TAIL}`;
+export function wrapInHost(content: string, reset: string = HOST_RESET): string {
+  return `${hostHead(reset)}\n${content}\n${ARTIFACT_TAIL}`;
 }
 
-/** The complete document the page sends when it republishes itself. */
+/** The complete document the page sends when it republishes itself, in the skeleton it came in. */
 export function buildArtifactDocument(parts: PageParts): string {
-  return wrapInHost(buildPageContent(parts));
+  if (parts.hostReset !== undefined && /<\/style/i.test(parts.hostReset)) throw new Error('The host reset contains "</style"');
+  return wrapInHost(buildPageContent(parts), parts.hostReset);
 }
 
 /** Reads the parts back out of a page's HTML (a saved artifact, or the content file). Null if it isn't one. */
@@ -98,7 +109,8 @@ export function parsePage(html: string): PageParts | null {
   const script = new RegExp(`<script type="module" id="${PAGE_IDS.script}">([\\s\\S]*?)</script>`).exec(html)?.[1];
   if (title === undefined || style === undefined || tuning === undefined || script === undefined) return null;
   const unescape = (s: string) => s.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  return { title: unescape(title), style, tuning, script };
+  const hostReset = /^<!doctype html><html><head>(?:<meta [^>]*>)*<style>([^<]*)<\/style><\/head><body>/i.exec(html)?.[1];
+  return { title: unescape(title), style, tuning, script, ...(hostReset === undefined ? {} : { hostReset }) };
 }
 
 /**
@@ -114,10 +126,13 @@ export function readLivePage(doc: Document): PageParts | null {
   // The page's own <title> sits beside its style; a host may put another one in <head>.
   const titles = Array.from(doc.getElementsByTagName('title'));
   const title = titles.find((t) => t.parentNode === style.parentNode) ?? titles[0];
+  // The host's reset: the first plain <style> in <head> (the page's own style sits in <body>).
+  const reset = Array.from(doc.head?.getElementsByTagName('style') ?? []).find((el) => !el.id && /\bbody\s*\{/.test(el.textContent ?? ''));
   return {
     title: title?.textContent ?? '',
     style: style.textContent ?? '',
     tuning: doc.getElementById(PAGE_IDS.tuning)?.textContent ?? '',
     script: script.textContent ?? '',
+    ...(reset ? { hostReset: reset.textContent ?? '' } : {}),
   };
 }
