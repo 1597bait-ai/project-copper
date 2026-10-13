@@ -2,8 +2,6 @@
 // Studio first opens: the published page is rebuilt from its title, #copper-style, #copper-tuning
 // and #copper-game alone, so a stylesheet anywhere else would be lost on the next save.
 
-import { FONT_NAME } from '../ui/textRules';
-
 const STYLE_ID = 'copper-studio-css';
 
 const chevron = `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%23f6f1e5' stroke-width='2'/%3E%3C/svg%3E")`;
@@ -13,8 +11,10 @@ const CSS = `
   --bg: #14161c; --panel: #1b1f28; --panel2: #252a36; --field: #0f1116; --line: #2c3240; --line2: #3c4456;
   --text: #f6f1e5; --muted: #b9b1a2; --dim: #8d877b; --copper: #e8914a; --copper-hi: #f4a861; --ink: #1a1208;
   --good: #8be08b; --bad: #ff8576; --warn: #ffd27a;
-  --head: "${FONT_NAME}", ui-monospace, monospace;
   --body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  /* Headings too: the game's pixel font draws its C almost closed, so at these sizes
+     "COPPER" read "OOPPER" and "Crew" "Orew". */
+  --head: var(--body);
 }
 .cs {
   position: fixed; inset: 0; z-index: 20; box-sizing: border-box;
@@ -34,7 +34,7 @@ const CSS = `
 /* ---- header */
 .cs-head { grid-area: head; display: flex; align-items: center; flex-wrap: wrap; gap: 10px 16px; padding: 10px 16px; background: #0f1116; border-bottom: 2px solid var(--copper); }
 .cs-brand { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; flex: 1 1 auto; min-width: 0; }
-.cs-logo { font: 700 22px/1 var(--head); letter-spacing: .05em; color: var(--copper); white-space: nowrap; text-shadow: 2px 2px 0 #000; margin-right: 4px; }
+.cs-logo { font: 800 21px/1 var(--head); letter-spacing: .06em; color: var(--copper); white-space: nowrap; text-shadow: 2px 2px 0 #000; margin-right: 4px; }
 .cs-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line2); background: var(--panel); color: var(--muted); font-size: 13px; line-height: 1.3; white-space: nowrap; }
 .cs-chip b { color: var(--text); font-weight: 700; }
 .cs-chip.is-dirty { border-color: var(--copper); background: rgba(232,145,74,.14); color: var(--copper-hi); }
@@ -102,12 +102,12 @@ const CSS = `
 /* ---- the page */
 .cs-main { grid-area: main; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; -webkit-overflow-scrolling: touch; padding: 26px 28px 120px; }
 .cs-page { max-width: 900px; margin: 0 auto; }
-.cs-h1 { font: 700 32px/1.1 var(--head); letter-spacing: .03em; color: var(--text); margin-bottom: 6px; }
+.cs-h1 { font: 800 30px/1.15 var(--head); letter-spacing: .005em; color: var(--text); margin-bottom: 6px; }
 .cs-blurb { color: var(--muted); max-width: 72ch; margin-bottom: 22px; }
 .cs-card { margin: 0 0 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); overflow: hidden; }
 .cs-card-head { padding: 14px 18px 12px; border-bottom: 1px solid var(--line); background: #1f2430; }
 .cs-crumb { margin-bottom: 2px; color: var(--dim); font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
-.cs-h2 { font: 700 20px/1.2 var(--head); letter-spacing: .03em; color: var(--copper-hi); }
+.cs-h2 { font: 800 18px/1.25 var(--head); letter-spacing: .01em; color: var(--copper-hi); }
 .cs-card-help { margin-top: 4px; color: var(--muted); font-size: 14px; }
 .cs-more { width: 100%; min-height: 46px; justify-content: space-between; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: #191d26; color: var(--muted); padding: 0 18px; }
 .cs-more:hover:not(:disabled) { background: #20252f; border-color: var(--line); color: var(--text); }
@@ -181,7 +181,7 @@ const CSS = `
 .cs-layer { position: fixed; inset: 0; z-index: 10; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(6,7,10,.74); pointer-events: auto; }
 .cs-dialog { display: flex; flex-direction: column; width: min(660px, 100%); max-height: 100%; border: 1px solid var(--line2); border-top: 3px solid var(--copper); border-radius: 12px; background: var(--panel); box-shadow: 0 24px 64px rgba(0,0,0,.6); }
 .cs-dialog-head { padding: 16px 20px 6px; }
-.cs-dialog-head h2 { font: 700 22px/1.2 var(--head); letter-spacing: .03em; color: var(--text); }
+.cs-dialog-head h2 { font: 800 20px/1.25 var(--head); letter-spacing: .005em; color: var(--text); }
 .cs-dialog-body { display: flex; flex-direction: column; gap: 12px; min-height: 0; padding: 8px 20px 14px; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; }
 .cs-dialog-body > p { color: var(--muted); }
 .cs-dialog-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 20px 16px; border-top: 1px solid var(--line); }
@@ -206,7 +206,7 @@ const CSS = `
 /* ---- the floating way back during a play test */
 .cs-back { position: fixed; z-index: 25; top: 8px; left: 50%; display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px;
   border: 2px solid var(--copper); border-radius: 10px; background: rgba(15,17,22,.92); color: var(--text); box-shadow: 2px 3px 0 rgba(0,0,0,.45);
-  font: 700 18px/1 var(--head); letter-spacing: .05em; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  font: 800 16px/1 var(--head); letter-spacing: .05em; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
 .cs-back:hover { background: rgba(48,32,20,.95); }
 .cs-back:focus-visible { outline: 2px solid var(--copper-hi); outline-offset: 2px; }
 @media (pointer: coarse) { .cs-back { height: 44px; } }
