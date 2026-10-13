@@ -1,8 +1,8 @@
 // End-to-end check in a real (headless) browser. Plays through the core rules, the students, the
-// sleepy coworker and the map editor on a desktop screen, then the touch controls on phones held
-// sideways and upright, then Copper Studio: its settings, play tests and Map tab, a save round trip
-// through the game page as claude.ai publishes it, and the Studio on a phone. Saves screenshots to
-// .smoke/.
+// sleepy coworker and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
+// Studio: its settings, play tests and Map tab, a save round trip through the game page as
+// claude.ai publishes it, and the Studio on a phone; then the touch controls on phones held
+// sideways and upright. Saves screenshots to .smoke/.
 //
 //   npm run build && npm run build:single && npm run e2e
 //   E2E_URL=http://localhost:5173 npm run e2e     (against a running dev server instead)
@@ -1103,12 +1103,18 @@ if (runs('studio')) {
     check('◀ STUDIO comes back to the Studio, the draft as it was', (await kit.unsaved()) === pending && !(await backButton(page)).visible);
     await kit.menu('Exit studio');
     await sceneActive('Menu');
-    const exited = await page.evaluate(() => ({ tuning: window.__COPPER__.tuning(), hash: location.hash, studio: window.__COPPER__.studio.isOpen }));
+    const exited = await page.evaluate(() => ({
+      tuning: window.__COPPER__.tuning(),
+      hash: location.hash,
+      studio: window.__COPPER__.studio.isOpen,
+      // A control still focused in the hidden Studio would keep the game's keys (Enter below) from it.
+      focusInStudio: document.activeElement?.closest('.cs') != null,
+    }));
     const menuLabel = await screenLabel(page);
     check(
-      'Exit studio goes back to the game running the saved version (the draft is kept for next time)',
-      !exited.studio && exited.tuning.revision === saved.revision && JSON.stringify(exited.tuning.values) === JSON.stringify(saved.values) && exited.hash === '' && !menuLabel?.startsWith('Play test') && (await kit.snapshot()).unsaved === pending,
-      { exited, menuLabel },
+      'Exit studio goes back to the game running the saved version (the draft is kept for next time), and the keyboard goes back to the game',
+      !exited.studio && exited.tuning.revision === saved.revision && JSON.stringify(exited.tuning.values) === JSON.stringify(saved.values) && exited.hash === '' && !exited.focusInStudio && !menuLabel?.startsWith('Play test') && (await kit.snapshot()).unsaved === pending,
+      { exited: { ...exited, tuning: { revision: exited.tuning.revision, values: exited.tuning.values } }, menuLabel },
     );
     await page.keyboard.press('Enter');
     await sceneActive('Game');

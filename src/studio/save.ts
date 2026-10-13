@@ -305,7 +305,8 @@ async function writeRepo(file: TuningFile): Promise<{ reloads: boolean }> {
 
 /**
  * Hands the tuning file to the developer to keep or send: a file download where the page may offer
- * one, else the clipboard, else `'shown'` (the caller shows the text for copying by hand).
+ * one, else the clipboard, else `'shown'` (the caller shows the text for copying by hand; also when
+ * the viewer declines claude.ai's download).
  */
 export async function exportTuning(file: TuningFile): Promise<'downloaded' | 'copied' | 'shown'> {
   const filename = `copper-tuning-v${file.revision}.json`;
@@ -317,8 +318,10 @@ export async function exportTuning(file: TuningFile): Promise<'downloaded' | 'co
       try {
         await downloads.save({ filename, data });
         return 'downloaded';
-      } catch {
-        // Declined (or downloads are off in this view): copying is the next best thing.
+      } catch (e) {
+        // The viewer said no: show the file rather than overwrite their clipboard behind their back.
+        if (field(e, 'code') === 'declined') return 'shown';
+        // Downloads are off in this view (or a prompt is already open): copying is the next best thing.
       }
     } else if (isTopLevel() && downloadLink(filename, data)) return 'downloaded';
   } else if (downloadLink(filename, data)) return 'downloaded';

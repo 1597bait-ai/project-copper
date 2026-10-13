@@ -193,6 +193,9 @@ export class Studio {
     this.stage.editor?.flush();
     this.persistNow();
     this.closeMenu();
+    // Hand the keyboard back to the game: a control left focused in the hidden Studio (the menu's
+    // Exit studio) would keep taking key presses, and the Studio keeps those from the game.
+    if (document.activeElement instanceof HTMLElement && this.root.contains(document.activeElement)) document.activeElement.blur();
     this.state = 'closed';
     this.root.hidden = true;
     this.root.querySelectorAll('.cs-layer').forEach((l) => l.remove());

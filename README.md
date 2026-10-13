@@ -277,6 +277,8 @@ tuned in Copper Studio):
 2. ~~Students who alert Mr. Gravy, square school, map editor~~
 3. ~~Pokemon-style pixel art, the school from the floor-plan sketch, yelling and following students,
    high alert, the sleepy coworker's hush money~~
-4. Shop between shifts (boots, tools, bags, keys) and persistent progress
-5. Sound and music, more schools
-6. App store builds
+4. ~~Copper Studio: every number, line and the map tunable from the game page, saved into the shared
+   game for testers without touching code~~
+5. Shop between shifts (boots, tools, bags, keys) and persistent progress
+6. Sound and music, more schools
+7. App store builds

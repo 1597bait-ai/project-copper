@@ -305,6 +305,7 @@ describe('saving on claude.ai', () => {
     ['rate_limited', 'rate_limited'],
     ['invalid_content', 'failed'],
     ['transform_error', 'failed'],
+    ['read_only_path', 'failed'],
   ])('a %s rejection becomes SaveError %s, without a retry', async (code, expected) => {
     const claude = installClaude({ publish: () => Promise.reject({ code, message: `host says ${code}` }) });
     installDocument(LIVE);
@@ -444,17 +445,24 @@ describe('exporting the tuning file', () => {
     expect(writeText).not.toHaveBeenCalled();
   });
 
-  it('copies it instead when the viewer declines the download', async () => {
+  it('shows it (without touching the clipboard) when the viewer declines the download', async () => {
     installClaude({ save: () => Promise.reject({ code: 'declined', message: 'no thanks' }) });
+    const { links } = installDocument(LIVE);
+    const writeText = installClipboard();
+    await expect(save.exportTuning(file)).resolves.toBe('shown');
+    expect(writeText).not.toHaveBeenCalled();
+    expect(links).toEqual([]); // no download behind the viewer's back
+  });
+
+  it('copies it when claude.ai can not offer the file, and shows it when copying fails too', async () => {
+    installClaude({ save: () => Promise.reject({ code: 'unavailable', message: 'saves are off here' }) });
     const { links } = installDocument(LIVE);
     const writeText = installClipboard();
     await expect(save.exportTuning(file)).resolves.toBe('copied');
     expect(writeText).toHaveBeenCalledWith(stringifyTuning(file));
-    expect(links).toEqual([]); // no download behind the viewer's back
-  });
+    expect(links).toEqual([]);
 
-  it('shows it when neither works', async () => {
-    installClaude({ save: () => Promise.reject({ code: 'declined', message: 'no thanks' }) });
+    installClaude({ save: () => Promise.reject({ code: 'rate_limited', message: 'a prompt is open' }) });
     installDocument(LIVE);
     installClipboard(false);
     await expect(save.exportTuning(file)).resolves.toBe('shown');

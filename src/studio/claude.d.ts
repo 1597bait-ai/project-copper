@@ -29,7 +29,10 @@ export interface UserCapability {
   canEdit(): Promise<boolean>;
 }
 
-/** `downloads`: offers a file to the viewer, who confirms (or declines: code `declined`). */
+/**
+ * `downloads`: offers a file to the viewer, who confirms. Rejects `declined` when they say no (never
+ * retry that), `rate_limited` while another prompt is open, `unavailable` / `not_granted` where saves are off.
+ */
 export interface DownloadsCapability {
   save(request: { filename: string; data: string | Blob }): Promise<{ status: 'saved' | 'delivered' }>;
 }
