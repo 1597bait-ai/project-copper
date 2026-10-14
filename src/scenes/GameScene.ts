@@ -25,6 +25,7 @@ import { DEPTH } from '../ui/depth';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { numberWord } from '../ui/words';
 import { parseMap } from '../world/mapText';
+import { Lighting } from '../world/Lighting';
 import { DEFAULT_MAP, currentMapText } from '../world/maps';
 import { validateMap } from '../world/validate';
 import { World } from '../world/World';
@@ -133,6 +134,8 @@ export class GameScene extends Phaser.Scene {
   hudTop = 0;
   /** The sleepy coworker while he's around (one at a time). */
   coworker: SleepyCoworker | null = null;
+  /** The dark and the lights in it, or null with the lighting off (see src/world/Lighting.ts). */
+  lighting: Lighting | null = null;
   /**
    * Chance he's under a desk you finish scrapping (from BALANCE each shift). Tests set it to 1;
    * wakeSleepyCoworker() skips the roll altogether.
@@ -219,6 +222,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.channelBar = this.add.graphics().setDepth(DEPTH.channelBar);
+    this.lighting = Lighting.create(this, this.world, this.player);
 
     const cam = this.cameras.main;
     cam.startFollow(this.player.zone, true, 0.12, 0.12);
@@ -250,6 +254,8 @@ export class GameScene extends Phaser.Scene {
       this.events.off(Phaser.Scenes.Events.POST_UPDATE, this.syncViews, this);
       this.events.off(Phaser.Scenes.Events.RESUME, this.onResume, this);
       this.scale.off(Phaser.Scale.Events.RESIZE, this.fitCamera, this);
+      this.lighting?.destroy();
+      this.lighting = null;
     });
 
     this.time.delayedCall(600, () =>
@@ -724,6 +730,8 @@ export class GameScene extends Phaser.Scene {
     this.layoutOverheads(view);
 
     this.drawChannelBar();
+    // Last: the light follows Dalton to where he is now, and the cones as just drawn.
+    this.lighting?.update(this.player, this.boss, this.students, time);
   }
 
   /**

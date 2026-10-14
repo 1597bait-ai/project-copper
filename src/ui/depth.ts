@@ -14,6 +14,8 @@ export const DEPTH = {
   cones: 7,
   /** sortDepth() values sit between this and sortedBase + 1. */
   sortedBase: 10,
+  /** The dark (src/world/Lighting.ts) covers everything in the world below it, not what people say. */
+  darkness: 18,
   bubbles: 19,
   marks: 20,
   channelBar: 25,

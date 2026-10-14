@@ -461,6 +461,68 @@ const loot = section('loot', 'Scrap & Loot', 'What scrap sells for, and what eac
   ),
 ]);
 
+const lighting = section(
+  'lighting',
+  'Lighting',
+  "The lights are off inside the school: how dark it is, what your flashlight shows, and how much Mr. Gravy's and the students' vision cones light up the dark.",
+  [
+    {
+      id: 'lighting.dark',
+      title: 'The dark',
+      fields: [
+        num('balance.lighting.darkness', 'Darkness', 0, 1, 0.05, {
+          percent: true,
+          help: 'Where no light reaches. 0% turns the lighting off.',
+          preview: (v) => {
+            const d = v.balance.lighting.darkness;
+            return d === 0 ? 'off: the school is lit' : d === 1 ? 'pitch black where no light reaches' : `${fmt((1 - d) * 100, 0)}% of the scene shows where no light reaches`;
+          },
+        }),
+        num('balance.lighting.daylight', 'Daylight outside', 0, 1, 0.05, {
+          percent: true,
+          help: 'Outdoors: the parking lot, the grass. 100% is broad daylight, 0% as dark as inside.',
+        }),
+        {
+          path: 'balance.lighting.shadows',
+          label: 'Walls cast shadows',
+          help: 'With shadows you only see into a room from its doorway.',
+          kind: {
+            type: 'choice',
+            options: [
+              { value: 'walls', label: 'Yes (walls and closed doors)' },
+              { value: 'none', label: 'No: light shines through walls' },
+            ],
+          },
+        },
+      ],
+    },
+    {
+      id: 'lighting.flashlight',
+      title: 'Your flashlight',
+      help: 'Whoever you play carries it: a glow all around and a beam the way you face.',
+      fields: [
+        num('balance.lighting.glowTiles', 'Glow all around you', 0.5, 12, 0.25, { unit: 'tiles', help: 'Fully bright for the first 40%, then fading out.' }),
+        num('balance.lighting.beamTiles', 'Beam reach', 0, 25, 0.25, {
+          unit: 'tiles',
+          help: '0 for no beam. Fully bright for the first half.',
+          preview: (v) => `Mr. Gravy sees ${fmt(gravyRange(v))} tiles, students ${fmt(v.balance.students.visionRangeTiles)} (${fmt(v.balance.students.visionRangeTiles * v.balance.students.highAlertRangeFactor)} on high alert)`,
+        }),
+        num('balance.lighting.beamHalfAngleDeg', 'Beam half-width', 5, 90, 1, { unit: '°', preview: (v) => `${fmt(v.balance.lighting.beamHalfAngleDeg * 2, 0)}° beam` }),
+        num('balance.lighting.beamTurnSeconds', 'Beam swings round in', 0, 2, 0.05, { unit: 's', advanced: true, help: 'How long it takes to point where you turned (most of the way).' }),
+      ],
+    },
+    {
+      id: 'lighting.cones',
+      title: 'Their lights',
+      help: 'Vision cones light up the dark like flashlights (dimmer further out), so you can see where people look. 0% hides a cone in the dark.',
+      fields: [
+        num('balance.lighting.gravyLight', "Mr. Gravy's flashlight", 0, 1, 0.05, { percent: true }),
+        num('balance.lighting.studentLight', "Students' phones", 0, 1, 0.05, { percent: true }),
+      ],
+    },
+  ],
+);
+
 const shift = section('shift', 'Shift & Rules', 'How long a shift lasts, warnings, doors, and the phone camera.', [
   {
     id: 'shift.main',
@@ -491,7 +553,7 @@ const shift = section('shift', 'Shift & Rules', 'How long a shift lasts, warning
   },
 ]);
 
-export const SECTIONS: Section[] = [crew, gravy, students, coworker, loot, shift];
+export const SECTIONS: Section[] = [crew, gravy, students, coworker, loot, lighting, shift];
 
 export const FIELDS: Field[] = SECTIONS.flatMap((s) => s.groups.flatMap((g) => g.fields));
 

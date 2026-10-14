@@ -1,5 +1,5 @@
 // End-to-end check in a real (headless) browser. Plays through the core rules, the students, the
-// sleepy coworker and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
+// sleepy coworker, the lighting and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
 // Studio: its settings, play tests and Map tab, a save round trip through the game page as
 // claude.ai publishes it (two owners saving at once and two tabs of one browser too), and the
 // Studio on a phone; then the touch controls on phones held sideways and upright. Saves
@@ -7,7 +7,7 @@
 //
 //   npm run build && npm run build:single && npm run e2e
 //   E2E_URL=http://localhost:5173 npm run e2e     (against a running dev server instead)
-//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, editor, studio, phone, portrait)
+//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, lighting, editor, studio, phone, portrait)
 //
 // Uses debug access via window.__COPPER__ to teleport people around. Every position comes from the
 // map and the world at runtime (fixtures by type, open hallway stretches, reachable tiles), and the
@@ -136,6 +136,26 @@ function parkBoss(t, facing = 0) {
 function calm() {
   g.boss.grace = 9999;
   for (const s of g.students) s.ignore = 9999;
+}
+/** Where world spot p is drawn on the game canvas (game px). */
+function onCanvas(p) {
+  const cam = g.cameras.main;
+  return { x: Math.round((p.x - cam.worldView.x) * cam.zoom), y: Math.round((p.y - cam.worldView.y) * cam.zoom) };
+}
+/** The canvas pixel at world spot p in the next frame drawn (r + g + b). */
+const pixelAt = (p) => new Promise((done) => { const c = onCanvas(p); gm.renderer.snapshotPixel(c.x, c.y, (col) => done(col.r + col.g + col.b)); });
+/**
+ * How much of what's at each world spot shows through the dark (0-1): its pixel as drawn, over the
+ * same pixel with the dark (the lighting's layer) hidden.
+ */
+async function shows(points) {
+  const lit = [];
+  for (const p of points) lit.push(await pixelAt(p));
+  g.lighting.layer.setVisible(false);
+  const bare = [];
+  for (const p of points) bare.push(await pixelAt(p));
+  g.lighting.layer.setVisible(true);
+  return points.map((_, i) => Math.round((100 * lit[i]) / Math.max(1, bare[i])) / 100);
 }
 /** Every texture in use, and anything turned at an angle (the pixel art always faces the camera). */
 function sceneObjects(scene) {
@@ -828,6 +848,121 @@ if (runs('coworker')) {
   await context.close();
 }
 
+// ---- desktop: the lights are off inside: your flashlight, wall shadows, daylight, their lights ----
+if (runs('lighting')) {
+  const { context, page, errors, G, wait, shot, sceneActive } = await open('lighting', { viewport: { width: 1600, height: 900 } });
+  await page.keyboard.press('Enter');
+  await sceneActive('Game');
+  await wait(0.3);
+  // Nobody else moves or shines a light anywhere a check doesn't put them: the students frozen and
+  // Mr. Gravy parked, out in the parking lot (daylight there, so their lights change nothing).
+  const LB = await G(`calm();
+    const y = g.world.map.height - 3;
+    g.students.forEach((s, i) => { s.update = () => null; s.standAt((2.5 + i) * T, (y + 0.5) * T, 0); });
+    parkBoss({ x: g.world.map.width - 4, y }, 0);
+    return { ...B.lighting, on: g.lighting !== null };`);
+  check('the lighting is on in a shift (the shipped darkness)', LB.on && LB.darkness > 0, LB);
+  // Where no light reaches, about 1 - darkness of what's there shows (a little more: the dark is tinted).
+  const dark = 1 - LB.darkness + 0.12;
+  const pct = (n) => `${Math.round(n * 100)}%`;
+  await wait(4.5); // the opening toast fades
+
+  // (a) Your light: a glow all round and a beam the way you face, turning with you.
+  const row = await G('return openRow(11);');
+  const mid = { x: row.x + 5, y: row.y };
+  await G(`put(g.player.body, ${JSON.stringify(mid)}); g.player.facing = 0;`);
+  await wait(0.6);
+  const spots = `const d = center(${JSON.stringify(mid)});
+    return shows([{ x: d.x + 0.6 * T, y: d.y }, { x: d.x + 5 * T, y: d.y }, { x: d.x - 5 * T, y: d.y }, { x: d.x + 13 * T, y: d.y }]);`;
+  const lit = await G(spots);
+  await shot('hall');
+  check(`your light: the hall right beside Dalton shows as lit (${pct(lit[0])})`, lit[0] > 0.8, lit);
+  check(
+    `...his flashlight lights the hall 5 tiles ahead (${pct(lit[1])}), 5 tiles behind him stays dark (${pct(lit[2])}), and further on (${pct(lit[3])})`,
+    lit[1] > 0.45 && lit[2] < dark && lit[3] < dark,
+    { lit, dark },
+  );
+  await G('g.player.facing = Math.PI;');
+  await wait(0.8);
+  const turned = await G(spots);
+  check(`...and swings round when he turns: now behind him is lit (${pct(turned[2])}) and ahead dark (${pct(turned[1])})`, turned[2] > 0.45 && turned[1] < dark, turned);
+
+  // (b) Walls cast shadows: a room right behind the wall beside Dalton stays dark, its wall's face lit.
+  const wall = await G(`const from = steps(spawnTile());
+    for (const k of from.keys()) {
+      const [x, y] = k.split(',').map(Number);
+      if (kindAt(x, y) !== 'hallway' || !clearTile(x, y) || !g.world.sight.blocked(x, y + 1) || !clearTile(x, y + 2) || !kindAt(x, y + 2) || kindAt(x, y + 2) === 'outside') continue;
+      if (g.lighting.levelAt(center({ x, y }), center({ x, y: y + 2 })) > 0) continue;
+      return { x, y };
+    }
+    return null;`);
+  if (!wall) check('a hallway with a room right behind its wall (for the shadow check)', false);
+  else {
+    await G(`put(g.player.body, ${JSON.stringify(wall)}); g.player.facing = Math.PI / 2;`);
+    await wait(0.6);
+    const sh = await G(`const d = center(${JSON.stringify(wall)}); return shows([{ x: d.x, y: d.y + 2 * T }, { x: d.x, y: (${wall.y} + 1.3) * T }]);`);
+    await shot('shadow');
+    check(`walls cast shadows: the room behind the wall beside Dalton stays dark (${pct(sh[0])}), his flashlight pointed right at it`, sh[0] < dark, { sh, wall });
+    check(`...while the face of that wall is lit (${pct(sh[1])})`, sh[1] > 0.5, sh);
+  }
+
+  // (c) Daylight outside, the dark starting at the school's door.
+  const day = await G(`const sp = spawnTile();
+    let lobby = null;
+    for (let r = 1; r < 12 && !lobby; r++) for (let dy = -r; dy <= r && !lobby; dy++) for (let dx = -r; dx <= r && !lobby; dx++) {
+      if (kindAt(sp.x + dx, sp.y + dy) === 'lobby' && clearTile(sp.x + dx, sp.y + dy) && dist({ x: dx, y: dy }, { x: 0, y: 0 }) > B.lighting.glowTiles + 1) lobby = { x: sp.x + dx, y: sp.y + dy };
+    }
+    put(g.player.body, sp); g.player.facing = Math.PI / 2;
+    return { sp, lobby };`);
+  await wait(0.6);
+  const outdoors = await G(`return shows([center({ x: ${day.sp.x} - 6, y: ${day.sp.y} }), center(${JSON.stringify(day.lobby)})]);`);
+  await shot('outside');
+  check(`daylight outside: the parking lot shows in full (${pct(outdoors[0])}), the school's lobby is dark (${pct(outdoors[1])})`, outdoors[0] > 0.95 && outdoors[1] < dark, { outdoors, day });
+
+  // (d) Mr. Gravy's flashlight and the students' phones: their cones light the dark, dimmer for students.
+  // (Parked, he'd look around; held still he looks straight down the hall.)
+  await G(`put(g.player.body, ${JSON.stringify(row)}); g.player.facing = Math.PI; parkBoss({ x: ${row.x + 7}, y: ${row.y} }, 0); g.boss.update = () => false;`);
+  await wait(0.6);
+  const cone = `return shows([center({ x: ${row.x + 9.5}, y: ${row.y} }), center({ x: ${row.x + 4}, y: ${row.y} })]);`;
+  const gravy = await G(cone);
+  await shot('flashlight');
+  check(`Mr. Gravy's flashlight: his cone lights the dark ahead of him (${pct(gravy[0])}), not behind him (${pct(gravy[1])})`, gravy[0] > dark + 0.15 && gravy[1] < dark, gravy);
+  await G('B.lighting.gravyLight = 0;');
+  await wait(0.3);
+  const off = await G(cone);
+  await G(`B.lighting.gravyLight = ${LB.gravyLight};`);
+  check(`...and at 0% it's hidden in the dark (${pct(off[0])})`, off[0] < dark, off);
+  await G(`parkBoss({ x: g.world.map.width - 4, y: g.world.map.height - 3 }, 0); g.students[0].standAt((${row.x + 7} + 0.5) * T, (${row.y} + 0.5) * T, 0);`);
+  await wait(0.6);
+  const phone = await G(cone);
+  check(
+    `a student's phone lights their cone too (${pct(phone[0])}), dimmer than Mr. Gravy's flashlight`,
+    phone[0] > dark + 0.08 && phone[1] < dark && (LB.studentLight >= LB.gravyLight || phone[0] < gravy[0]),
+    { phone, gravy },
+  );
+
+  // (e) The dark lies over the people and things in the school, under what they say and their marks.
+  const layers = await G(`const d = g.lighting.layer.depth;
+    const people = [g.player, g.boss, ...g.students].map((p) => p.view.container.depth);
+    const things = [...g.world.fixtures.map((f) => f.sprite.depth), ...g.world.decor.map((o) => o.depth), g.world.van.image.depth];
+    const said = [g.boss.bubble.root.depth, g.boss.bubble.tail.depth, g.boss.emote.g.depth, ...g.students.map((s) => s.emote.g.depth)];
+    return { d, people: Math.max(...people), things: Math.max(...things), said: Math.min(...said) };`);
+  check("the dark covers people and things but not speech bubbles or '!' marks", layers.people < layers.d && layers.things < layers.d && layers.said > layers.d, layers);
+
+  // How long the lighting takes each frame (logged; headless rendering is slow, so it's generous).
+  await G(`const L = g.lighting; const update = L.update; window.__lightTimes = [];
+    L.update = function (...a) { const t0 = performance.now(); update.apply(this, a); window.__lightTimes.push(performance.now() - t0); };
+    window.__lightUpdate = update;`);
+  await page.waitForTimeout(2000);
+  const ms = await G(`g.lighting.update = window.__lightUpdate;
+    const times = window.__lightTimes.sort((a, b) => a - b);
+    return { frames: times.length, median: Math.round(times[times.length >> 1] * 100) / 100 };`);
+  check(`the lighting's work each frame stays small (median ${ms.median} ms over ${ms.frames} frames)`, ms.frames > 0 && ms.median < 12, ms);
+
+  check('no console errors (lighting)', errors.length === 0, errors);
+  await context.close();
+}
+
 // ---- desktop: the map editor, in Copper Studio's Map tab ------------------------------------------
 if (runs('editor')) {
   const { context, page, errors, G, wait, shot, sceneActive, toScreen, click, endShift } = await open(
@@ -940,6 +1075,7 @@ if (runs('studio')) {
   const DALTON = 'characters.dalton.stats.speed';
   const SHIFT = 'balance.shift.lengthSeconds';
   const HUSH = 'balance.sleepyCoworker.hushMoney';
+  const DARK = 'balance.lighting.darkness';
   const sectionOf = (path) => SECTIONS.find((s) => s.groups.some((g) => g.fields.some((f) => f.path === path))).id;
   const sectionFields = (id) => SECTIONS.find((s) => s.id === id).groups.flatMap((g) => g.fields);
   const sameSet = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
@@ -1100,9 +1236,14 @@ if (runs('studio')) {
     // (b) Play test: the draft runs in a real shift.
     const daltonNow = getPath(savedValues, DALTON);
     const daltonNew = other(daltonNow, 4, 2);
+    const darkNow = getPath(savedValues, DARK);
+    const darkNew = other(darkNow, 0, 0.5);
     await kit.type(GRAVY, gravyNew);
     await kit.tab('crew');
     await kit.type(DALTON, daltonNew);
+    await kit.tab(sectionOf(DARK));
+    // A percent: the box takes 0-100.
+    await kit.type(DARK, darkNew * 100);
     const pending = await kit.unsaved();
     await page.selectOption('.cs-play select', 'dalton');
     await page.click('.cs-play .cs-btn');
@@ -1110,10 +1251,11 @@ if (runs('studio')) {
     await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.3 && window.__COPPER__.game.registry.get('hud:layout'));
     const run = await G(`return {
       playing: window.__COPPER__.studio.isPlaying, studioHidden: document.querySelector('.cs').hidden, crew: g.player.character.id,
-      player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNew}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNew}) * T };`);
+      player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNew}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNew}) * T,
+      lit: g.lighting !== null };`);
     check(
-      `Studio: Play test runs the draft: Dalton walks at speed ${daltonNew}, Mr. Gravy chases at speed ${gravyNew}`,
-      run.playing && run.studioHidden && run.crew === 'dalton' && approx(run.player, run.wantPlayer) && approx(run.boss, run.wantBoss),
+      `Studio: Play test runs the draft: Dalton walks at speed ${daltonNew}, Mr. Gravy chases at speed ${gravyNew}, the lighting ${darkNew > 0 ? 'on' : 'off'} (darkness ${darkNew * 100}%)`,
+      run.playing && run.studioHidden && run.crew === 'dalton' && approx(run.player, run.wantPlayer) && approx(run.boss, run.wantBoss) && run.lit === darkNew > 0,
       run,
     );
     const back = await backButton(page);
@@ -1148,8 +1290,8 @@ if (runs('studio')) {
     await page.keyboard.press('Enter');
     await sceneActive('Game');
     await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.2);
-    const real = await G(`return { player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNow}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNow}) * T };`);
-    check('...a shift from the menu has the saved speeds again', approx(real.player, real.wantPlayer) && approx(real.boss, real.wantBoss), real);
+    const real = await G(`return { player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNow}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNow}) * T, lit: g.lighting !== null };`);
+    check('...a shift from the menu has the saved speeds and lighting again', approx(real.player, real.wantPlayer) && approx(real.boss, real.wantBoss) && real.lit === darkNow > 0, real);
 
     // (c) The Map tab: the editor inside the Studio, its edits in the draft, play tested.
     await page.evaluate(() => (location.hash = '#studio'));

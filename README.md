@@ -31,6 +31,13 @@ around: every student is on **HIGH ALERT** for 45 s (see the banner). They see f
 faster, chatter about you, and even get suspicious of an empty-handed Dalton (a '?' fills
 up, faster up close, then they yell). Dalton's disguise fools students too.
 
+**Lights out:** the school's lights are off. You carry a flashlight: a glow all around you and a
+beam the way you face, swinging round as you turn, so you see far ahead and little behind. Walls
+and closed doors cast shadows, so you only see into a room from its doorway. Mr. Gravy's vision
+cone is his flashlight and the students' are their phones: you see where they look from the dark,
+dimmer the further out (the students' phones dimmer still), and their '!', '?' and shouts show
+over the dark. Outside it's daylight. (Browsers without WebGL, rare now, play it lit.)
+
 **Sleepy coworker:** now and then (1 in 4, once a shift) a coworker is napping under a desk
 you just scrapped. He wakes with a start and pays you **$50** not to tell the boss. It counts
 toward the shift's earnings and shows on the shift report as hush money.
@@ -67,7 +74,7 @@ npm run dev        # http://localhost:5173 (also on your Wi-Fi, so you can open 
 | `npm run build:single` | Whole game in one `dist-single/index.html` (works offline, easy to share) |
 | `npm run artifact` | The game page for claude.ai, `.tmp-artifact/project-copper.html`: the single-file build with the repo's balance inside (see [Copper Studio](#copper-studio-balancing-without-code)) |
 | `npm test` | Unit tests + "level lint" (every map is checked for unknown things, unreachable loot, a walkable patrol) |
-| `npm run e2e` | Plays through the rules, students, map editor and Copper Studio (save round trips on the claude.ai page too, two owners saving at once among them) in a headless browser on desktop and phones, saving screenshots to `.smoke/` (run `npm run build` and `npm run build:single` first) |
+| `npm run e2e` | Plays through the rules, students, lighting, map editor and Copper Studio (save round trips on the claude.ai page too, two owners saving at once among them) in a headless browser on desktop and phones, saving screenshots to `.smoke/` (run `npm run build` and `npm run build:single` first) |
 | `npm run map:check` | Checks every map in `src/assets/maps/`, lists its problems and prints the loot-depth numbers `npm test` enforces |
 | `npm run map:format` | Rewrites map files with the current legend at the top |
 | `npm run art` | Re-renders the app icons (`public/icon-*.png`) |
@@ -76,8 +83,9 @@ npm run dev        # http://localhost:5173 (also on your Wi-Fi, so you can open 
 
 Copper Studio is the developer's app for tuning the game, built into the game page itself. It
 edits every value listed in `src/config/schema.ts`: the crew (stats, trades, abilities), Mr. Gravy,
-the students, the sleepy coworker, scrap prices and every fixture, the shift rules, what people
-say, and the school map (its **Map** tab is the map editor). Nothing in it needs Claude: change a
+the students, the sleepy coworker, scrap prices and every fixture, the lighting (how dark, your
+flashlight's glow and beam, wall shadows, how much their cones light the dark; Darkness 0% turns it
+off), the shift rules, what people say, and the school map (its **Map** tab is the map editor). Nothing in it needs Claude: change a
 number, play test it, save it.
 
 **Opening it**
@@ -162,12 +170,13 @@ src/config/        ← the design board lives here: add content (balance numbers
   tuning.json        the saved balance: what differs from the code's values, and the save history
   decor.ts           decorations: plants, trash cans, trees, cars, boiler, generator, sinks (sizes)
 src/systems/       pure game rules, no Phaser (bag, scrapping math, A* pathfinding, vision, clock, save,
-                   studentMind / alert / coworker: what students and the coworker decide)
+                   studentMind / alert / coworker: what students and the coworker decide, lighting:
+                   what your light reaches past the walls and where it's dark before any light)
 src/entities/      Player, Boss (Mr. Gravy's AI), Student, SleepyCoworker, Fixture, Door;
                    CharacterView draws every person, SpeechBubble the bubbles and '!'/'?'/'$'
 src/world/         map format (legend.ts, mapText.ts), checker (validate.ts), editor rules
                    (editing.ts), which tile each cell shows (autotile.ts), level building
-                   (World.ts), map list (maps.ts)
+                   (World.ts), map list (maps.ts), the dark and the lights in it (Lighting.ts)
 src/assets/maps/   the maps themselves, as plain text
 src/scenes/        Boot → Menu → Game + Hud → ShiftEnd, and the map Editor (Copper Studio's Map tab)
 src/studio/        Copper Studio: forms built from the schema, the draft, play tests, saving
@@ -279,6 +288,9 @@ tuned in Copper Studio):
   leave you alone for 8 s. High alert lasts 45 s; on alert an empty-handed Dalton takes 1.2–3 s
   of staring to get yelled at.
 - Sleepy coworker: 1 in 4 desks (once a shift), $50, and it counts as earnings.
+- Lighting: 90% dark inside (daylight outside), a glow 3.5 tiles round you and a 56° beam 7 tiles
+  ahead (further than anyone sees you from), Mr. Gravy's flashlight at 50% and the students'
+  phones at 30%.
 
 ## Roadmap
 
@@ -288,6 +300,8 @@ tuned in Copper Studio):
    high alert, the sleepy coworker's hush money~~
 4. ~~Copper Studio: every number, line and the map tunable from the game page, saved into the shared
    game for testers without touching code~~
-5. Shop between shifts (boots, tools, bags, keys) and persistent progress
-6. Sound and music, more schools
-7. App store builds
+5. ~~Lights out: your flashlight's glow and beam, wall shadows, Mr. Gravy's flashlight and the
+   students' phones~~
+6. Shop between shifts (boots, tools, bags, keys) and persistent progress
+7. Sound and music, more schools
+8. App store builds
