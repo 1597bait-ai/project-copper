@@ -62,32 +62,33 @@ export const BALANCE = {
   },
 
   /**
-   * The lights are off inside the school. You carry a light: a glow all around you and a
-   * flashlight beam the way you face, swinging round as you turn. Walls and closed doors cast
-   * shadows (you see into a room from its doorway), and Mr. Gravy's and the students' vision cones
-   * are their own, dimmer lights. Outside it's daylight. See src/systems/lighting.ts.
+   * Fog of war. You only see what's in your line of sight: walls and closed doors block it, so you
+   * see into a room from its doorway. Everywhere else shows in light gray as you last saw it, with
+   * nobody in it, and places you've never seen show the building's layout but not what's in the
+   * rooms. See src/systems/fog.ts.
    */
-  lighting: {
-    /** How dark it is where no light reaches (0-1): 0 turns the lighting off, 1 is pitch black. */
-    darkness: 0.9,
-    /** Daylight outside (0-1): 1 = no darkness outdoors, 0 = as dark as inside. */
-    daylight: 1,
-    /** 'walls': walls and closed doors cast shadows. 'none': the light shines through them. */
-    shadows: 'walls' as 'walls' | 'none',
-    /** Your light reaches this many tiles all around you... */
-    glowTiles: 3.5,
-    /** ...and the flashlight beam this many tiles ahead (0 = no flashlight)... */
-    beamTiles: 7,
-    /** ...this many degrees to each side of where you face (half bright at the edge). */
-    beamHalfAngleDeg: 28,
-    /** Seconds the beam takes to catch up when you turn (most of the way). */
-    beamTurnSeconds: 0.15,
-    /** How much Mr. Gravy's vision cone lights up the dark (0-1): his flashlight. 0 hides it in the dark. */
-    gravyLight: 0.5,
-    /** The same for the students' cones (their phones). */
-    studentLight: 0.3,
-    /** The colour of the dark. */
-    color: 0x070a14,
+  fog: {
+    /** 'off' shows the whole school, everyone in it, all the time. */
+    mode: 'on' as 'on' | 'off',
+    /** How far you see (tiles)... */
+    viewTiles: 10,
+    /** ...and how wide (degrees): 360 sees all around you, less only the way you face... */
+    viewAngleDeg: 360,
+    /** ...plus this far all around you, your back included, when it's narrower (tiles). */
+    nearTiles: 2,
+    /** Seconds a narrower view takes to swing round when you turn (most of the way). */
+    turnSeconds: 0.15,
+    /**
+     * Mr. Gravy, the students and the coworker out of your sight. 'hidden': gone, vision cones and
+     * all. 'cones': gone, but their cones show where you can see the floor. 'shown': always seen.
+     */
+    people: 'hidden' as 'hidden' | 'cones' | 'shown',
+    /** How washed out places you've never seen are (0-1). 0: like anywhere else out of sight. */
+    unexploredHaze: 0.35,
+    /** How much colour places out of sight lose (0-1): 1 is all gray. */
+    gray: 1,
+    /** How light they look (0-1): 0 keeps their brightness, 1 is white. */
+    light: 0.45,
   },
 
   /** How close (tiles, centre to centre) you need to be to scrap / unlock. */

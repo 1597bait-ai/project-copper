@@ -25,7 +25,7 @@ import { DEPTH } from '../ui/depth';
 import { cssPerGamePixel, isPortrait, isTouchDevice, money, textStyle } from '../ui/theme';
 import { numberWord } from '../ui/words';
 import { parseMap } from '../world/mapText';
-import { Lighting } from '../world/Lighting';
+import { Fog, type Watched } from '../world/Fog';
 import { DEFAULT_MAP, currentMapText } from '../world/maps';
 import { validateMap } from '../world/validate';
 import { World } from '../world/World';
@@ -76,8 +76,9 @@ export interface HudState {
   /** Word got around after a student reported you: every student is on high alert until it runs out. */
   alert: { left: number; total: number } | null;
   /**
-   * Everyone onto Dalton: where they are on screen (px), their mark ('!' after him, '?' unsure)
-   * and its colour. The HUD points at the ones out of sight with markers at the screen's edge.
+   * Everyone onto Dalton that he can see (the fog of war hides the rest): where they are on screen
+   * (px), their mark ('!' after him, '?' unsure) and its colour. The HUD points at the ones off
+   * screen with markers at the screen's edge.
    */
   threats: Threat[];
   /** Where Dalton is on screen (px). */
@@ -134,8 +135,8 @@ export class GameScene extends Phaser.Scene {
   hudTop = 0;
   /** The sleepy coworker while he's around (one at a time). */
   coworker: SleepyCoworker | null = null;
-  /** The dark and the lights in it, or null with the lighting off (see src/world/Lighting.ts). */
-  lighting: Lighting | null = null;
+  /** The fog of war, or null with it off (see src/world/Fog.ts). */
+  fog: Fog | null = null;
   /**
    * Chance he's under a desk you finish scrapping (from BALANCE each shift). Tests set it to 1;
    * wakeSleepyCoworker() skips the roll altogether.
@@ -222,7 +223,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.channelBar = this.add.graphics().setDepth(DEPTH.channelBar);
-    this.lighting = Lighting.create(this, this.world, this.player);
+    this.fog = Fog.create(this, this.world, this.player);
 
     const cam = this.cameras.main;
     cam.startFollow(this.player.zone, true, 0.12, 0.12);
@@ -254,8 +255,8 @@ export class GameScene extends Phaser.Scene {
       this.events.off(Phaser.Scenes.Events.POST_UPDATE, this.syncViews, this);
       this.events.off(Phaser.Scenes.Events.RESUME, this.onResume, this);
       this.scale.off(Phaser.Scale.Events.RESIZE, this.fitCamera, this);
-      this.lighting?.destroy();
-      this.lighting = null;
+      this.fog?.destroy();
+      this.fog = null;
     });
 
     this.time.delayedCall(600, () =>
@@ -731,11 +732,18 @@ export class GameScene extends Phaser.Scene {
     this.boss.syncView(time, view, size);
     for (const s of this.students) s.syncView(time, view, size);
     this.coworker?.syncView(time, size);
+    // Who Dalton can see from where he is now (before the bubbles make room for each other: unseen ones don't need any).
+    this.fog?.update(this.player, this.watched(), time);
     this.layoutOverheads(view);
 
     this.drawChannelBar();
-    // Last: the light follows Dalton to where he is now, and the cones as just drawn.
-    this.lighting?.update(this.player, this.boss, this.students, time);
+  }
+
+  /** Everyone the fog of war can hide. */
+  private watched(): Watched[] {
+    const people: Watched[] = [this.boss, ...this.students];
+    if (this.coworker) people.push(this.coworker);
+    return people;
   }
 
   /**
@@ -856,8 +864,9 @@ export class GameScene extends Phaser.Scene {
     const onScreen = (x: number, y: number) => ({ x: (x - view.x) * cam.zoom, y: (y - view.y) * cam.zoom });
     h.me = onScreen(p.x, p.y);
     h.threats = [];
-    if (this.boss.alarm) h.threats.push({ ...onScreen(this.boss.x, this.boss.y), mark: this.boss.alarm, color: this.boss.alarmColor });
-    for (const s of this.students) if (s.alarm) h.threats.push({ ...onScreen(s.x, s.y), mark: s.alarm });
+    // Only the ones Dalton can see (the fog of war hides where the rest are; the red edge still warns him).
+    if (this.boss.alarm && this.boss.seen) h.threats.push({ ...onScreen(this.boss.x, this.boss.y), mark: this.boss.alarm, color: this.boss.alarmColor });
+    for (const s of this.students) if (s.alarm && s.seen) h.threats.push({ ...onScreen(s.x, s.y), mark: s.alarm });
     h.ability = p.ability
       ? {
           name: p.ability.name,

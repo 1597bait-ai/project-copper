@@ -527,9 +527,10 @@ export class HudScene extends Phaser.Scene {
   }
 
   /**
-   * Markers at the screen's edge pointing at anyone onto Dalton who can't be seen (off screen, or
+   * Markers at the screen's edge pointing at anyone onto Dalton who isn't on screen (off it, or
    * under one of the HUD's windows): the '!' or '?' over their head, with an arrow their way.
    * Phones see fewer tiles around Dalton, so this is how he knows who's yelling from out of view.
+   * (Only people Dalton can see are in h.threats: the fog of war hides where the rest are.)
    */
   private drawEdgeMarkers(g: Phaser.GameObjects.Graphics, h: HudState, covers: Rect[]) {
     if (!h.threats.length) return;

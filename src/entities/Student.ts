@@ -58,8 +58,8 @@ export class Student {
   readonly emote: Emote;
   readonly bubble: SpeechBubble;
   private readonly cone: Phaser.GameObjects.Graphics;
-  /** Their vision cone's outline as last drawn (null off screen): their phone's light in the dark (see src/world/Lighting.ts). */
-  conePoints: Point[] | null = null;
+  /** Whether Dalton can see them: out of his sight (the fog of war) they're hidden, with what they say. */
+  seen = true;
 
   facing = Math.random() * Math.PI * 2;
   /** Where Dalton was the last time this student saw him. */
@@ -268,16 +268,27 @@ export class Student {
     this.bubble.place(this.x, head - 4, view, size);
 
     this.cone.clear();
-    this.conePoints = null;
     // Cones are only worth drawing when they can be on screen.
     const cone = this.visionCone;
     const r = cone.range;
     if (this.x + r < view.x || this.x - r > view.right || this.y + r < view.y || this.y - r > view.bottom) return;
     const after = attention === 'yell' || attention === 'follow';
     const look = after ? CONE_LOOKS.studentAfter : attention === 'notice' ? CONE_LOOKS.studentNotice : this.highAlert ? CONE_LOOKS.studentAlert : CONE_LOOKS.student;
-    this.conePoints = conePolygon(this.world.sight, cone, 20);
     // Faint while they leave Dalton alone.
-    drawCone(this.cone, this.conePoints, this.mind.ignore > 0 && !after ? fadedCone(look, 0.3) : look);
+    drawCone(this.cone, conePolygon(this.world.sight, cone, 20), this.mind.ignore > 0 && !after ? fadedCone(look, 0.3) : look);
+  }
+
+  /**
+   * Shows or hides them (and their mark and speech bubble) as Dalton sees them or loses sight of
+   * them. Their vision cone shows with `cone` (it lies under the fog, so only where Dalton sees the floor).
+   */
+  setSeen(seen: boolean, cone = seen): void {
+    this.cone.setVisible(cone);
+    if (seen === this.seen) return;
+    this.seen = seen;
+    this.view.setVisible(seen);
+    this.emote.setHidden(!seen);
+    this.bubble.setHidden(!seen);
   }
 
   destroy(): void {

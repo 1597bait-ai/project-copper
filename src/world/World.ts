@@ -24,6 +24,12 @@ export interface Van {
   image: Phaser.GameObjects.Image;
 }
 
+/** Something standing on the floor (a fixture, a decoration, the van) and the tiles it stands on, in world px. */
+export interface Thing {
+  image: Phaser.GameObjects.Image;
+  rect: Phaser.Geom.Rectangle;
+}
+
 // ---- How things stand on the map (shared with the map editor) ------------------------------
 
 /**
@@ -64,6 +70,7 @@ export function addTileLayers(scene: Phaser.Scene, map: ParsedMap): { floor: Pha
 
 /** Builds a playable level from a parsed text map (see src/world/mapText.ts). */
 export class World {
+  readonly floor: Phaser.Tilemaps.TilemapLayer;
   readonly walls: Phaser.Tilemaps.TilemapLayer;
   readonly width: number;
   readonly height: number;
@@ -76,6 +83,8 @@ export class World {
   readonly doors: Door[] = [];
   /** Decorations: plants, trash cans, trees, parked cars, the boiler... */
   readonly decor: Phaser.GameObjects.Image[] = [];
+  /** The fixtures, decorations and van with the tiles they stand on (what the fog of war hides until seen). */
+  readonly things: Thing[] = [];
   readonly rooms: Room[];
   readonly patrol: Point[];
   readonly playerSpawn: Point;
@@ -91,6 +100,7 @@ export class World {
     const center = (p: { x: number; y: number }): Point => ({ x: (p.x + 0.5) * TILE, y: (p.y + 0.5) * TILE });
 
     const layers = addTileLayers(scene, map);
+    this.floor = layers.floor;
     this.walls = layers.walls;
     this.walls.setCollisionByExclusion([-1]);
     this.width = map.width * TILE;
@@ -99,6 +109,7 @@ export class World {
     this.nav = wallGrid(map);
     this.sight = wallGrid(map);
     this.solids = scene.physics.add.staticGroup();
+    const tiles = (r: TileRect) => new Phaser.Geom.Rectangle(r.x * TILE, r.y * TILE, r.w * TILE, r.h * TILE);
     const block = (r: TileRect, inset: number) => {
       for (let ty = r.y; ty < r.y + r.h; ty++) for (let tx = r.x; tx < r.x + r.w; tx++) this.nav.set(tx, ty, true);
       this.solids.add(scene.add.zone((r.x + r.w / 2) * TILE, (r.y + r.h / 2) * TILE, r.w * TILE - inset * 2, r.h * TILE - inset * 2));
@@ -118,7 +129,9 @@ export class World {
       const def = FIXTURES[f.id];
       if (!def) continue;
       const { x, y } = center(f);
-      this.fixtures.push(new Fixture(scene, def, x, y, def.wallMounted ? fixtureMount(map, f.x, f.y) : 'front'));
+      const fixture = new Fixture(scene, def, x, y, def.wallMounted ? fixtureMount(map, f.x, f.y) : 'front');
+      this.fixtures.push(fixture);
+      this.things.push({ image: fixture.sprite, rect: tiles({ x: f.x, y: f.y, w: 1, h: 1 }) });
       if (def.solid) block({ x: f.x, y: f.y, w: 1, h: 1 }, TILE * 0.1);
     }
 
@@ -126,11 +139,15 @@ export class World {
       if (d.id === 'gravy_truck') {
         // Mr. Gravy's truck is scrap, not scenery: a fixture standing on the bottom of its block (one per map).
         if (this.fixtures.some((f) => f.def.gravyTruck)) continue;
-        this.fixtures.push(new Fixture(scene, FIXTURES.gravy_truck, (d.x + d.w / 2) * TILE, (d.y + d.h) * TILE - TILE / 2));
+        const truck = new Fixture(scene, FIXTURES.gravy_truck, (d.x + d.w / 2) * TILE, (d.y + d.h) * TILE - TILE / 2);
+        this.fixtures.push(truck);
+        this.things.push({ image: truck.sprite, rect: tiles(d) });
         block(d, 6);
         continue;
       }
-      this.decor.push(standOnFloor(scene.add.image(0, 0, decorKey(d)), d));
+      const image = standOnFloor(scene.add.image(0, 0, decorKey(d)), d);
+      this.decor.push(image);
+      this.things.push({ image, rect: tiles(d) });
       // Solid but see-through: blocks walking only.
       block(d, d.w > 1 || d.h > 1 ? 6 : TILE * 0.12);
     }
@@ -148,6 +165,7 @@ export class World {
     const image = standOnFloor(scene.add.image(0, 0, vanKey(v)), v).setDisplaySize(rect.width, rect.height);
     block(v, 6);
     this.van = { rect, reach, image };
+    this.things.push({ image, rect });
   }
 
   private roomIndexAt(x: number, y: number): number {

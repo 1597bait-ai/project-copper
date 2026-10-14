@@ -37,6 +37,8 @@ export class SleepyCoworker {
   /** His '!' and '$' (GameScene hides it under someone's speech bubble). */
   readonly emote: Emote;
   private readonly zs: Phaser.GameObjects.Text[];
+  /** Whether Dalton can see him (the fog of war hides him out of sight). */
+  seen = true;
   step: CoworkerStep = 'nap';
   x: number;
   y: number;
@@ -129,7 +131,7 @@ export class SleepyCoworker {
 
     // Zs drift up and to the right, one after another, fading as they go.
     this.zs.forEach((z, i) => {
-      z.setVisible(napping);
+      z.setVisible(napping && this.seen);
       if (!napping) return;
       const k = ((time / 1000 + (i * Z_SECONDS) / ZS) % Z_SECONDS) / Z_SECONDS;
       const x = this.x + (14 + k * 26 + Math.sin(k * Math.PI * 2) * 6) * size;
@@ -138,6 +140,15 @@ export class SleepyCoworker {
         .setScale((0.7 + k * 0.6) * size)
         .setAlpha(Math.min(1, (1 - k) * 2) * this.view.container.alpha);
     });
+  }
+
+  /** Shows or hides him (and his marks) as Dalton sees him or loses sight of him. */
+  setSeen(seen: boolean): void {
+    if (seen === this.seen) return;
+    this.seen = seen;
+    this.view.setVisible(seen);
+    this.emote.setHidden(!seen);
+    if (!seen) for (const z of this.zs) z.setVisible(false);
   }
 
   destroy(): void {

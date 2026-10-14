@@ -1,5 +1,5 @@
 // End-to-end check in a real (headless) browser. Plays through the core rules, the students, the
-// sleepy coworker, Mr. Gravy's truck, the lighting and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
+// sleepy coworker, Mr. Gravy's truck, the fog of war and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
 // Studio: its settings, play tests and Map tab, a save round trip through the game page as
 // claude.ai publishes it (two owners saving at once and two tabs of one browser too), and the
 // Studio on a phone; then the touch controls on phones held sideways and upright. Saves
@@ -7,7 +7,7 @@
 //
 //   npm run build && npm run build:single && npm run e2e
 //   E2E_URL=http://localhost:5173 npm run e2e     (against a running dev server instead)
-//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, truck, lighting, editor, studio, phone, portrait)
+//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, truck, fog, editor, studio, phone, portrait)
 //
 // Uses debug access via window.__COPPER__ to teleport people around. Every position comes from the
 // map and the world at runtime (fixtures by type, open hallway stretches, reachable tiles), and the
@@ -142,20 +142,26 @@ function onCanvas(p) {
   const cam = g.cameras.main;
   return { x: Math.round((p.x - cam.worldView.x) * cam.zoom), y: Math.round((p.y - cam.worldView.y) * cam.zoom) };
 }
-/** The canvas pixel at world spot p in the next frame drawn (r + g + b). */
-const pixelAt = (p) => new Promise((done) => { const c = onCanvas(p); gm.renderer.snapshotPixel(c.x, c.y, (col) => done(col.r + col.g + col.b)); });
+/** The canvas pixel at world spot p in the next frame drawn: [r, g, b]. */
+const rgbAt = (p) => new Promise((done) => { const c = onCanvas(p); gm.renderer.snapshotPixel(c.x, c.y, (col) => done([col.r, col.g, col.b])); });
 /**
- * How much of what's at each world spot shows through the dark (0-1): its pixel as drawn, over the
- * same pixel with the dark (the lighting's layer) hidden.
+ * What the fog of war does at each world spot: its pixel as drawn (shown) and with the fog hidden
+ * (bare). covered: the fog hides what's there; gray: what shows is gray (the fog's memory of the
+ * place, not the school's colours).
  */
-async function shows(points) {
-  const lit = [];
-  for (const p of points) lit.push(await pixelAt(p));
-  g.lighting.layer.setVisible(false);
+async function fogAt(points) {
+  const shown = [];
+  for (const p of points) shown.push(await rgbAt(p));
+  g.fog.layer.setVisible(false);
   const bare = [];
-  for (const p of points) bare.push(await pixelAt(p));
-  g.lighting.layer.setVisible(true);
-  return points.map((_, i) => Math.round((100 * lit[i]) / Math.max(1, bare[i])) / 100);
+  for (const p of points) bare.push(await rgbAt(p));
+  g.fog.layer.setVisible(true);
+  return points.map((_, i) => ({
+    shown: shown[i],
+    bare: bare[i],
+    covered: shown[i].some((v, c) => Math.abs(v - bare[i][c]) > 12),
+    gray: Math.max(...shown[i]) - Math.min(...shown[i]) < 16,
+  }));
 }
 /** Every texture in use, and anything turned at an angle (the pixel art always faces the camera). */
 function sceneObjects(scene) {
@@ -391,6 +397,8 @@ function studioKit(page, { touch = false } = {}) {
       await input.fill(String(value));
       await input.blur();
     },
+    /** Picks the option labelled `label` for a choice setting on the open tab. */
+    pick: (path, label) => kit.field(path).locator('select.cs-select').selectOption({ label }),
     /** Picks an item from the header's ⋯ menu. */
     menu: async (item) => {
       await press(page.locator('.cs-menuwrap .cs-btn'));
@@ -886,118 +894,197 @@ if (runs('truck')) {
   await context.close();
 }
 
-// ---- desktop: the lights are off inside: your flashlight, wall shadows, daylight, their lights ----
-if (runs('lighting')) {
-  const { context, page, errors, G, wait, shot, sceneActive } = await open('lighting', { viewport: { width: 1600, height: 900 } });
+// ---- desktop: fog of war: you see what's in your line of sight; the rest is gray memory, nobody in it ----
+if (runs('fog')) {
+  const { context, page, errors, G, wait, shot, sceneActive } = await open('fog', { viewport: { width: 1600, height: 900 } });
   await page.keyboard.press('Enter');
   await sceneActive('Game');
   await wait(0.3);
-  // Nobody else moves or shines a light anywhere a check doesn't put them: the students frozen and
-  // Mr. Gravy parked, out in the parking lot (daylight there, so their lights change nothing).
-  const LB = await G(`calm();
+  // Nobody moves unless a check puts them somewhere: the students frozen in a row and Mr. Gravy held
+  // still, at the bottom of the parking lot.
+  const FB = await G(`calm();
     const y = g.world.map.height - 3;
     g.students.forEach((s, i) => { s.update = () => null; s.standAt((2.5 + i) * T, (y + 0.5) * T, 0); });
     parkBoss({ x: g.world.map.width - 4, y }, 0);
-    return { ...B.lighting, on: g.lighting !== null };`);
-  check('the lighting is on in a shift (the shipped darkness)', LB.on && LB.darkness > 0, LB);
-  // Where no light reaches, about 1 - darkness of what's there shows (a little more: the dark is tinted).
-  const dark = 1 - LB.darkness + 0.12;
-  const pct = (n) => `${Math.round(n * 100)}%`;
+    g.boss.update = () => false;
+    return { ...B.fog, on: g.fog !== null };`);
+  check('the fog of war is on in a shift (the shipped settings)', FB.on && FB.mode === 'on' && FB.people === 'hidden', FB);
   await wait(4.5); // the opening toast fades
 
-  // (a) Your light: a glow all round and a beam the way you face, turning with you.
+  // (a) You see all around you, as far as the view reaches; past that it's fog: the school in light gray.
   const row = await G('return openRow(11);');
   const mid = { x: row.x + 5, y: row.y };
+  const far = Math.min(14, Math.ceil(FB.viewTiles) + 2);
   await G(`put(g.player.body, ${JSON.stringify(mid)}); g.player.facing = 0;`);
   await wait(0.6);
-  const spots = `const d = center(${JSON.stringify(mid)});
-    return shows([{ x: d.x + 0.6 * T, y: d.y }, { x: d.x + 5 * T, y: d.y }, { x: d.x - 5 * T, y: d.y }, { x: d.x + 13 * T, y: d.y }]);`;
-  const lit = await G(spots);
+  const around = await G(`const d = center(${JSON.stringify(mid)});
+    return fogAt([{ x: d.x + T, y: d.y }, { x: d.x + 5 * T, y: d.y }, { x: d.x - 5 * T, y: d.y }, { x: d.x + ${far} * T, y: d.y }]);`);
   await shot('hall');
-  check(`your light: the hall right beside Dalton shows as lit (${pct(lit[0])})`, lit[0] > 0.8, lit);
   check(
-    `...his flashlight lights the hall 5 tiles ahead (${pct(lit[1])}), 5 tiles behind him stays dark (${pct(lit[2])}), and further on (${pct(lit[3])})`,
-    lit[1] > 0.45 && lit[2] < dark && lit[3] < dark,
-    { lit, dark },
+    'you see all around you: the hall beside Dalton and 5 tiles ahead of and behind him shows in colour',
+    !around[0].covered && !around[1].covered && !around[2].covered,
+    around,
   );
-  await G('g.player.facing = Math.PI;');
-  await wait(0.8);
-  const turned = await G(spots);
-  check(`...and swings round when he turns: now behind him is lit (${pct(turned[2])}) and ahead dark (${pct(turned[1])})`, turned[2] > 0.45 && turned[1] < dark, turned);
+  check(`...but not past the ${FB.viewTiles} tiles you see: ${far} tiles off it's fog, in gray`, around[3].covered && around[3].gray, around[3]);
 
-  // (b) Walls cast shadows: a room right behind the wall beside Dalton stays dark, its wall's face lit.
-  const wall = await G(`const from = steps(spawnTile());
+  // (b) Walls block the view: a classroom right behind the wall beside Dalton is fogged, with
+  // whatever and whoever is in it, until he comes round into it.
+  const rooms = await G(`const from = steps(spawnTile());
+    const found = [];
     for (const k of from.keys()) {
       const [x, y] = k.split(',').map(Number);
-      if (kindAt(x, y) !== 'hallway' || !clearTile(x, y) || !g.world.sight.blocked(x, y + 1) || !clearTile(x, y + 2) || !kindAt(x, y + 2) || kindAt(x, y + 2) === 'outside') continue;
-      if (g.lighting.levelAt(center({ x, y }), center({ x, y: y + 2 })) > 0) continue;
-      return { x, y };
+      if (kindAt(x, y) !== 'hallway' || !clearTile(x, y)) continue;
+      for (const [dx, dy] of DIRS) {
+        const wall = { x: x + dx, y: y + dy };
+        const deep = { x: x + 2 * dx, y: y + 2 * dy };
+        if (!g.world.sight.blocked(wall.x, wall.y) || g.world.doors.some((d) => d.rect.contains(center(wall).x, center(wall).y))) continue;
+        if (kindAt(deep.x, deep.y) !== 'classroom' || !clearTile(deep.x, deep.y)) continue;
+        const room = g.world.roomAt(center(deep).x, center(deep).y);
+        // Somewhere in the room to walk to, two tiles along from there.
+        const inside = [[dy, dx], [-dy, -dx]].map(([px, py]) => ({ x: deep.x + 2 * px, y: deep.y + 2 * py })).find((t) => clearTile(t.x, t.y) && from.has(key(t)) && g.world.roomAt(center(t).x, center(t).y) === room);
+        const f = g.world.fixtures.findIndex((f) => g.world.roomAt(f.x, f.y) === room && dist(f, center(deep)) > T && f.ready);
+        if (inside && f >= 0) found.push({ out: { x, y }, dir: [dx, dy], deep, inside, f, wall: { x: center(wall).x - dx * 0.3 * T, y: center(wall).y - dy * 0.3 * T } });
+      }
     }
-    return null;`);
-  if (!wall) check('a hallway with a room right behind its wall (for the shadow check)', false);
+    return found;`);
+  let room = null;
+  for (const c of rooms) {
+    await G(`put(g.player.body, ${JSON.stringify(c.out)}); g.player.facing = Math.atan2(${c.dir[1]}, ${c.dir[0]});`);
+    await wait(0.3);
+    const unseen = await G(`const f = g.world.fixtures[${c.f}]; return !g.fog.sees(center(${JSON.stringify(c.deep)})) && !g.fog.knows(f.sprite) && !g.fog.sees(f);`);
+    if (unseen) {
+      room = c;
+      break;
+    }
+  }
+  if (!room) check('a classroom right behind a hallway wall, not seen yet (for the walls and memory checks)', false, rooms.length);
   else {
-    await G(`put(g.player.body, ${JSON.stringify(wall)}); g.player.facing = Math.PI / 2;`);
+    const F = `g.world.fixtures[${room.f}]`;
+    const deeper = { x: room.deep.x + room.dir[0], y: room.deep.y + room.dir[1] };
+    // A student in there, talking, and Mr. Gravy behind them on the alert, looking Dalton's way.
+    await G(`const s = g.students[0];
+      s.standAt(center(${JSON.stringify(room.deep)}).x, center(${JSON.stringify(room.deep)}).y, 0);
+      s.say('Anyone out there?', 60);
+      parkBoss(clearTile(${deeper.x}, ${deeper.y}) ? ${JSON.stringify(deeper)} : ${JSON.stringify(room.deep)}, Math.atan2(${-room.dir[1]}, ${-room.dir[0]}));
+      g.boss.state = 'alert';`);
+    await wait(0.4);
+    const people = `const s = g.students[0];
+      return { seen: s.seen, shown: s.view.container.visible, bubble: s.bubble.root.visible, boss: g.boss.seen, bossShown: g.boss.view.container.visible, cone: g.boss.cone.visible, hud: g.hud.threats.length };`;
+    const shut = await G(people);
+    const shutPx = await G(`return fogAt([center(${JSON.stringify(room.deep)}), ${JSON.stringify(room.wall)}]);`);
+    await shot('wall');
+    check('walls block the view: the classroom right behind the wall beside Dalton is fog, in gray', shutPx[0].covered && shutPx[0].gray, { room, shutPx });
+    check('...while the wall itself shows in colour', !shutPx[1].covered, shutPx[1]);
+    check(
+      "...a student in there can't be seen, nor what they say, and the HUD doesn't point at Mr. Gravy (on the alert in there)",
+      !shut.seen && !shut.shown && !shut.bubble && !shut.boss && !shut.bossShown && shut.hud === 0,
+      shut,
+    );
+    check("...and neither can Mr. Gravy's vision cone", !shut.cone, shut);
+    await G(`B.fog.people = 'cones';`);
+    await wait(0.2);
+    const cones = await G(people);
+    await G(`B.fog.people = 'shown';`);
+    await wait(0.2);
+    const shown = { ...(await G(people)), px: (await G(`return fogAt([center(${JSON.stringify(room.deep)})]);`))[0] };
+    await G(`B.fog.people = ${JSON.stringify(FB.people)};`);
+    await wait(0.2);
+    check("...tuned to show cones, his cone shows (he doesn't)", !cones.boss && cones.cone && !cones.shown, cones);
+    check(
+      '...tuned to show people, everyone shows through the fog in colour, talking too',
+      shown.boss && shown.bossShown && shown.seen && shown.shown && shown.bubble && !shown.px.covered && !shown.px.gray,
+      shown,
+    );
+
+    // What Dalton remembers of the classroom: nothing in it yet, just its floor. (No haze for the
+    // pixel checks, so they only see what's remembered.)
+    await G(`B.fog.unexploredHaze = 0; lookAt(${F});`);
+    await wait(0.4);
+    const before = (await G(`return fogAt([${F}.sprite.getCenter()]);`))[0];
+
+    // Come round into the room: it shows, with the student in it (and what they say).
+    await G(`put(g.player.body, ${JSON.stringify(room.inside)}); lookAt(g.player);`);
+    await wait(0.4);
+    const inside = await G(people);
+    const insidePx = await G(`return fogAt([center(${JSON.stringify(room.deep)})]);`);
+    const known = await G(`return g.fog.knows(${F}.sprite);`);
+    await shot('room');
+    check('come round into the room and you see it, in colour', !insidePx[0].covered, insidePx);
+    check('...the student in there shows, saying what they say, and the HUD points at Mr. Gravy', inside.seen && inside.shown && inside.bubble && inside.boss && inside.hud === 1, inside);
+
+    // Leave: what's in the room is remembered, in gray, nobody with it.
+    await G(`put(g.player.body, ${JSON.stringify(room.out)}); lookAt(${F});`);
     await wait(0.6);
-    const sh = await G(`const d = center(${JSON.stringify(wall)}); return shows([{ x: d.x, y: d.y + 2 * T }, { x: d.x, y: (${wall.y} + 1.3) * T }]);`);
-    await shot('shadow');
-    check(`walls cast shadows: the room behind the wall beside Dalton stays dark (${pct(sh[0])}), his flashlight pointed right at it`, sh[0] < dark, { sh, wall });
-    check(`...while the face of that wall is lit (${pct(sh[1])})`, sh[1] > 0.5, sh);
+    const after = (await G(`return fogAt([${F}.sprite.getCenter()]);`))[0];
+    const left = await G(people);
+    const explored = await G(`return g.fog.explored[${room.deep.y} * g.world.map.width + ${room.deep.x}];`);
+    await shot('remembered');
+    const label = await G(`return ${F}.label;`);
+    const changed = after.shown.reduce((n, v, c) => n + Math.abs(v - before.shown[c]), 0);
+    check(
+      `what's in a room shows once you've seen it: back out in the hall, the ${label} is there in gray where only floor showed before`,
+      before.covered && known && explored === 1 && after.covered && after.gray && changed > 20,
+      { before, after, changed, known, explored },
+    );
+    check('...and the student in there is hidden again, with what they say', !left.seen && !left.shown && !left.bubble, left);
+    await G(`B.fog.unexploredHaze = ${FB.unexploredHaze}; g.students[0].bubble.hide(); g.boss.state = 'pause'; lookAt(g.player);`);
   }
 
-  // (c) Daylight outside, the dark starting at the school's door.
-  const day = await G(`const sp = spawnTile();
-    let lobby = null;
-    for (let r = 1; r < 12 && !lobby; r++) for (let dy = -r; dy <= r && !lobby; dy++) for (let dx = -r; dx <= r && !lobby; dx++) {
-      if (kindAt(sp.x + dx, sp.y + dy) === 'lobby' && clearTile(sp.x + dx, sp.y + dy) && dist({ x: dx, y: dy }, { x: 0, y: 0 }) > B.lighting.glowTiles + 1) lobby = { x: sp.x + dx, y: sp.y + dy };
+  // A locked door blocks the view too, until it's unlocked.
+  const door = await G(`const from = steps(spawnTile());
+    for (const d of g.world.doors) {
+      if (!d.locked) continue;
+      const t = tileOf({ x: d.rect.left + 1, y: d.rect.top + 1 });
+      for (const [dx, dy] of DIRS) {
+        const out = { x: t.x - dx, y: t.y - dy };
+        const deep = { x: t.x + 2 * dx, y: t.y + 2 * dy };
+        if (from.has(key(out)) && clearTile(out.x, out.y) && clearTile(deep.x, deep.y)) return { door: g.world.doors.indexOf(d), out, deep };
+      }
     }
-    put(g.player.body, sp); g.player.facing = Math.PI / 2;
-    return { sp, lobby };`);
-  await wait(0.6);
-  const outdoors = await G(`return shows([center({ x: ${day.sp.x} - 6, y: ${day.sp.y} }), center(${JSON.stringify(day.lobby)})]);`);
-  await shot('outside');
-  check(`daylight outside: the parking lot shows in full (${pct(outdoors[0])}), the school's lobby is dark (${pct(outdoors[1])})`, outdoors[0] > 0.95 && outdoors[1] < dark, { outdoors, day });
+    return null;`);
+  if (door) {
+    await G(`put(g.player.body, ${JSON.stringify(door.out)});`);
+    await wait(0.4);
+    const shutDoor = { sees: await G(`return g.fog.sees(center(${JSON.stringify(door.deep)}));`), px: (await G(`return fogAt([center(${JSON.stringify(door.deep)})]);`))[0] };
+    await G(`g.world.doors[${door.door}].unlock();`);
+    await wait(0.4);
+    const openDoor = { sees: await G(`return g.fog.sees(center(${JSON.stringify(door.deep)}));`), px: (await G(`return fogAt([center(${JSON.stringify(door.deep)})]);`))[0] };
+    await shot('door');
+    check('a locked door blocks the view too: the room behind it shows once it is unlocked', !shutDoor.sees && shutDoor.px.covered && openDoor.sees && !openDoor.px.covered, { door, shutDoor, openDoor });
+  }
 
-  // (d) Mr. Gravy's flashlight and the students' phones: their cones light the dark, dimmer for students.
-  // (Parked, he'd look around; held still he looks straight down the hall.)
-  await G(`put(g.player.body, ${JSON.stringify(row)}); g.player.facing = Math.PI; parkBoss({ x: ${row.x + 7}, y: ${row.y} }, 0); g.boss.update = () => false;`);
-  await wait(0.6);
-  const cone = `return shows([center({ x: ${row.x + 9.5}, y: ${row.y} }), center({ x: ${row.x + 4}, y: ${row.y} })]);`;
-  const gravy = await G(cone);
-  await shot('flashlight');
-  check(`Mr. Gravy's flashlight: his cone lights the dark ahead of him (${pct(gravy[0])}), not behind him (${pct(gravy[1])})`, gravy[0] > dark + 0.15 && gravy[1] < dark, gravy);
-  await G('B.lighting.gravyLight = 0;');
-  await wait(0.3);
-  const off = await G(cone);
-  await G(`B.lighting.gravyLight = ${LB.gravyLight};`);
-  check(`...and at 0% it's hidden in the dark (${pct(off[0])})`, off[0] < dark, off);
-  await G(`parkBoss({ x: g.world.map.width - 4, y: g.world.map.height - 3 }, 0); g.students[0].standAt((${row.x + 7} + 0.5) * T, (${row.y} + 0.5) * T, 0);`);
-  await wait(0.6);
-  const phone = await G(cone);
+  // (c) Places never seen: their walls and floors show, but not what's in them.
+  const unseen = await G(`const explored = g.fog.explored;
+    let n = 0;
+    for (let i = 0; i < explored.length; i++) n += explored[i];
+    return { explored: n, tiles: explored.length, things: g.world.things.filter((t) => g.fog.knows(t.image)).length, total: g.world.things.length };`);
   check(
-    `a student's phone lights their cone too (${pct(phone[0])}), dimmer than Mr. Gravy's flashlight`,
-    phone[0] > dark + 0.08 && phone[1] < dark && (LB.studentLight >= LB.gravyLight || phone[0] < gravy[0]),
-    { phone, gravy },
+    `you've explored ${unseen.explored} of ${unseen.tiles} tiles and know ${unseen.things} of the ${unseen.total} things in the school: the rest is still to find`,
+    unseen.explored > 0 && unseen.explored < unseen.tiles && unseen.things > 0 && unseen.things < unseen.total,
+    unseen,
   );
 
-  // (e) The dark lies over the people and things in the school, under what they say and their marks.
-  const layers = await G(`const d = g.lighting.layer.depth;
+  // (d) The fog lies over the people and things in the school, under what the people you see say and their marks.
+  const layers = await G(`const d = g.fog.layer.depth;
     const people = [g.player, g.boss, ...g.students].map((p) => p.view.container.depth);
     const things = [...g.world.fixtures.map((f) => f.sprite.depth), ...g.world.decor.map((o) => o.depth), g.world.van.image.depth];
     const said = [g.boss.bubble.root.depth, g.boss.bubble.tail.depth, g.boss.emote.g.depth, ...g.students.map((s) => s.emote.g.depth)];
     return { d, people: Math.max(...people), things: Math.max(...things), said: Math.min(...said) };`);
-  check("the dark covers people and things but not speech bubbles or '!' marks", layers.people < layers.d && layers.things < layers.d && layers.said > layers.d, layers);
+  check("the fog covers people and things but not speech bubbles or '!' marks", layers.people < layers.d && layers.things < layers.d && layers.said > layers.d, layers);
 
-  // How long the lighting takes each frame (logged; headless rendering is slow, so it's generous).
-  await G(`const L = g.lighting; const update = L.update; window.__lightTimes = [];
-    L.update = function (...a) { const t0 = performance.now(); update.apply(this, a); window.__lightTimes.push(performance.now() - t0); };
-    window.__lightUpdate = update;`);
+  // How long the fog takes each frame while Dalton walks down a hall (logged; headless rendering is slow, so it's generous).
+  await G(`const F = g.fog; const update = F.update; window.__fogTimes = [];
+    F.update = function (...a) { const t0 = performance.now(); update.apply(this, a); window.__fogTimes.push(performance.now() - t0); };
+    window.__fogUpdate = update;
+    put(g.player.body, ${JSON.stringify(row)});
+    window.__fogWalk = setInterval(() => g.player.body.reset(g.player.x + 3, g.player.y), 16);`);
   await page.waitForTimeout(2000);
-  const ms = await G(`g.lighting.update = window.__lightUpdate;
-    const times = window.__lightTimes.sort((a, b) => a - b);
+  const ms = await G(`clearInterval(window.__fogWalk); g.fog.update = window.__fogUpdate;
+    const times = window.__fogTimes.sort((a, b) => a - b);
     return { frames: times.length, median: Math.round(times[times.length >> 1] * 100) / 100 };`);
-  check(`the lighting's work each frame stays small (median ${ms.median} ms over ${ms.frames} frames)`, ms.frames > 0 && ms.median < 12, ms);
+  check(`the fog's work each frame stays small (median ${ms.median} ms over ${ms.frames} frames, walking)`, ms.frames > 0 && ms.median < 12, ms);
 
-  check('no console errors (lighting)', errors.length === 0, errors);
+  check('no console errors (fog)', errors.length === 0, errors);
   await context.close();
 }
 
@@ -1113,7 +1200,7 @@ if (runs('studio')) {
   const DALTON = 'characters.dalton.stats.speed';
   const SHIFT = 'balance.shift.lengthSeconds';
   const HUSH = 'balance.sleepyCoworker.hushMoney';
-  const DARK = 'balance.lighting.darkness';
+  const FOG = 'balance.fog.mode';
   const sectionOf = (path) => SECTIONS.find((s) => s.groups.some((g) => g.fields.some((f) => f.path === path))).id;
   const sectionFields = (id) => SECTIONS.find((s) => s.id === id).groups.flatMap((g) => g.fields);
   const sameSet = (a, b) => a.length === b.length && [...a].sort().join('\n') === [...b].sort().join('\n');
@@ -1274,14 +1361,13 @@ if (runs('studio')) {
     // (b) Play test: the draft runs in a real shift.
     const daltonNow = getPath(savedValues, DALTON);
     const daltonNew = other(daltonNow, 4, 2);
-    const darkNow = getPath(savedValues, DARK);
-    const darkNew = other(darkNow, 0, 0.5);
+    const fogNow = getPath(savedValues, FOG);
+    const fogNew = other(fogNow, 'off', 'on');
     await kit.type(GRAVY, gravyNew);
     await kit.tab('crew');
     await kit.type(DALTON, daltonNew);
-    await kit.tab(sectionOf(DARK));
-    // A percent: the box takes 0-100.
-    await kit.type(DARK, darkNew * 100);
+    await kit.tab(sectionOf(FOG));
+    await kit.pick(FOG, FIELD_BY_PATH.get(FOG).kind.options.find((o) => o.value === fogNew).label);
     const pending = await kit.unsaved();
     await page.selectOption('.cs-play select', 'dalton');
     await page.click('.cs-play .cs-btn');
@@ -1290,10 +1376,10 @@ if (runs('studio')) {
     const run = await G(`return {
       playing: window.__COPPER__.studio.isPlaying, studioHidden: document.querySelector('.cs').hidden, crew: g.player.character.id,
       player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNew}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNew}) * T,
-      lit: g.lighting !== null };`);
+      fog: g.fog !== null };`);
     check(
-      `Studio: Play test runs the draft: Dalton walks at speed ${daltonNew}, Mr. Gravy chases at speed ${gravyNew}, the lighting ${darkNew > 0 ? 'on' : 'off'} (darkness ${darkNew * 100}%)`,
-      run.playing && run.studioHidden && run.crew === 'dalton' && approx(run.player, run.wantPlayer) && approx(run.boss, run.wantBoss) && run.lit === darkNew > 0,
+      `Studio: Play test runs the draft: Dalton walks at speed ${daltonNew}, Mr. Gravy chases at speed ${gravyNew}, the fog of war ${fogNew}`,
+      run.playing && run.studioHidden && run.crew === 'dalton' && approx(run.player, run.wantPlayer) && approx(run.boss, run.wantBoss) && run.fog === (fogNew === 'on'),
       run,
     );
     const back = await backButton(page);
@@ -1328,8 +1414,8 @@ if (runs('studio')) {
     await page.keyboard.press('Enter');
     await sceneActive('Game');
     await kit.until(() => window.__COPPER__.game.scene.getScene('Game').elapsed > 0.2);
-    const real = await G(`return { player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNow}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNow}) * T, lit: g.lighting !== null };`);
-    check('...a shift from the menu has the saved speeds and lighting again', approx(real.player, real.wantPlayer) && approx(real.boss, real.wantBoss) && real.lit === darkNow > 0, real);
+    const real = await G(`return { player: g.player.speed, wantPlayer: R.tilesPerSecond(${daltonNow}) * T, boss: g.boss.chaseSpeed, wantBoss: R.tilesPerSecond(${gravyNow}) * T, fog: g.fog !== null };`);
+    check('...a shift from the menu has the saved speeds and fog of war again', approx(real.player, real.wantPlayer) && approx(real.boss, real.wantBoss) && real.fog === (fogNow === 'on'), real);
 
     // (c) The Map tab: the editor inside the Studio, its edits in the draft, play tested.
     await page.evaluate(() => (location.hash = '#studio'));

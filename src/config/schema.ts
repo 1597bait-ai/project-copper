@@ -485,63 +485,77 @@ const loot = section('loot', 'Scrap & Loot', 'What scrap sells for, and what eac
   ),
 ]);
 
-const lighting = section(
-  'lighting',
-  'Lighting',
-  "The lights are off inside the school: how dark it is, what your flashlight shows, and how much Mr. Gravy's and the students' vision cones light up the dark.",
+const fog = section(
+  'fog',
+  'Fog of War',
+  "You only see what's in your line of sight. The rest of the school shows in light gray as you last saw it, with nobody in it, and rooms you've never looked into show their walls but not what's in them.",
   [
     {
-      id: 'lighting.dark',
-      title: 'The dark',
+      id: 'fog.main',
+      title: 'The fog',
       fields: [
-        num('balance.lighting.darkness', 'Darkness', 0, 1, 0.05, {
-          percent: true,
-          help: 'Where no light reaches. 0% turns the lighting off.',
-          preview: (v) => {
-            const d = v.balance.lighting.darkness;
-            return d === 0 ? 'off: the school is lit' : d === 1 ? 'pitch black where no light reaches' : `${fmt((1 - d) * 100, 0)}% of the scene shows where no light reaches`;
-          },
-        }),
-        num('balance.lighting.daylight', 'Daylight outside', 0, 1, 0.05, {
-          percent: true,
-          help: 'Outdoors: the parking lot, the grass. 100% is broad daylight, 0% as dark as inside.',
-        }),
         {
-          path: 'balance.lighting.shadows',
-          label: 'Walls cast shadows',
-          help: 'With shadows you only see into a room from its doorway.',
+          path: 'balance.fog.mode',
+          label: 'Fog of war',
           kind: {
             type: 'choice',
             options: [
-              { value: 'walls', label: 'Yes (walls and closed doors)' },
-              { value: 'none', label: 'No: light shines through walls' },
+              { value: 'on', label: 'On' },
+              { value: 'off', label: 'Off: see the whole school' },
             ],
           },
         },
-      ],
-    },
-    {
-      id: 'lighting.flashlight',
-      title: 'Your flashlight',
-      help: 'Whoever you play carries it: a glow all around and a beam the way you face.',
-      fields: [
-        num('balance.lighting.glowTiles', 'Glow all around you', 0.5, 12, 0.25, { unit: 'tiles', help: 'Fully bright for the first 40%, then fading out.' }),
-        num('balance.lighting.beamTiles', 'Beam reach', 0, 25, 0.25, {
-          unit: 'tiles',
-          help: '0 for no beam. Fully bright for the first half.',
-          preview: (v) => `Mr. Gravy sees ${fmt(gravyRange(v))} tiles, students ${fmt(v.balance.students.visionRangeTiles)} (${fmt(v.balance.students.visionRangeTiles * v.balance.students.highAlertRangeFactor)} on high alert)`,
+        {
+          path: 'balance.fog.people',
+          label: 'People out of sight',
+          help: "Mr. Gravy, the students and the sleepy coworker, and what they say. A vision cone only ever shows where you can see the floor.",
+          kind: {
+            type: 'choice',
+            options: [
+              { value: 'hidden', label: 'Hidden, vision cones too' },
+              { value: 'cones', label: 'Hidden, but their vision cones show' },
+              { value: 'shown', label: 'Shown anyway (in colour, through the fog)' },
+            ],
+          },
+        },
+        num('balance.fog.unexploredHaze', "Haze over places you've never seen", 0, 1, 0.05, {
+          percent: true,
+          help: "Their walls show either way, what's in them doesn't. 0% looks like anywhere else out of sight.",
         }),
-        num('balance.lighting.beamHalfAngleDeg', 'Beam half-width', 5, 90, 1, { unit: '°', preview: (v) => `${fmt(v.balance.lighting.beamHalfAngleDeg * 2, 0)}° beam` }),
-        num('balance.lighting.beamTurnSeconds', 'Beam swings round in', 0, 2, 0.05, { unit: 's', advanced: true, help: 'How long it takes to point where you turned (most of the way).' }),
       ],
     },
     {
-      id: 'lighting.cones',
-      title: 'Their lights',
-      help: 'Vision cones light up the dark like flashlights (dimmer further out), so you can see where people look. 0% hides a cone in the dark.',
+      id: 'fog.view',
+      title: 'What you see',
+      help: 'Never through walls or closed doors: you see into a room from its doorway.',
       fields: [
-        num('balance.lighting.gravyLight', "Mr. Gravy's flashlight", 0, 1, 0.05, { percent: true }),
-        num('balance.lighting.studentLight', "Students' phones", 0, 1, 0.05, { percent: true }),
+        num('balance.fog.viewTiles', 'How far you see', 2, 40, 0.5, {
+          unit: 'tiles',
+          help: 'Clear for the first 80%, then fading out.',
+          preview: (v) =>
+            `Mr. Gravy sees ${fmt(gravyRange(v))} tiles, students ${fmt(v.balance.students.visionRangeTiles)} (${fmt(v.balance.students.visionRangeTiles * v.balance.students.highAlertRangeFactor)} on high alert)`,
+        }),
+        num('balance.fog.viewAngleDeg', 'How wide you see', 30, 360, 5, {
+          unit: '°',
+          preview: (v) => (v.balance.fog.viewAngleDeg >= 360 ? 'all around you' : `${fmt(v.balance.fog.viewAngleDeg, 0)}° the way you face`),
+        }),
+        num('balance.fog.nearTiles', 'All around you, when narrower', 0, 10, 0.25, {
+          unit: 'tiles',
+          help: 'Your back included. Only counts when you see less than 360°.',
+        }),
+        num('balance.fog.turnSeconds', 'A narrower view swings round in', 0, 2, 0.05, {
+          unit: 's',
+          advanced: true,
+          help: 'How long it takes to look where you turned (most of the way).',
+        }),
+      ],
+    },
+    {
+      id: 'fog.look',
+      title: 'How it looks',
+      fields: [
+        num('balance.fog.gray', 'Gray', 0, 1, 0.05, { percent: true, help: 'How much colour places out of sight lose. 100% is all gray.' }),
+        num('balance.fog.light', 'Light', 0, 0.9, 0.05, { percent: true, help: 'How washed out they are. 0% keeps their brightness.' }),
       ],
     },
   ],
@@ -577,7 +591,7 @@ const shift = section('shift', 'Shift & Rules', 'How long a shift lasts, warning
   },
 ]);
 
-export const SECTIONS: Section[] = [crew, gravy, students, coworker, loot, lighting, shift];
+export const SECTIONS: Section[] = [crew, gravy, students, coworker, loot, fog, shift];
 
 export const FIELDS: Field[] = SECTIONS.flatMap((s) => s.groups.flatMap((g) => g.fields));
 

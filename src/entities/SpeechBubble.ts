@@ -73,6 +73,8 @@ export class SpeechBubble {
   private left = 0;
   private saying = false;
   private covered = false;
+  /** Out of Dalton's sight in the fog of war: not shown, and out of other bubbles' way. */
+  private hidden = false;
   /** Art pixels the box is raised above its usual place. */
   private stem = 0;
   /** How much bigger than normal it's drawn (phones zoomed out: see GameScene.overheadScale). */
@@ -104,7 +106,7 @@ export class SpeechBubble {
 
   /** Where the box is (world px) in its usual place, or null when there's nothing to say. */
   get bounds(): Box | null {
-    if (!this.saying) return null;
+    if (!this.saying || this.hidden) return null;
     const k = this.size;
     return {
       x: this.root.x + (this.body.x - this.width / 2) * k,
@@ -137,6 +139,13 @@ export class SpeechBubble {
   hide(): void {
     this.saying = false;
     this.left = 0;
+    this.refresh();
+  }
+
+  /** Hides it while the speaker is out of Dalton's sight (it keeps talking, unseen). */
+  setHidden(on: boolean): void {
+    if (on === this.hidden) return;
+    this.hidden = on;
     this.refresh();
   }
 
@@ -180,7 +189,7 @@ export class SpeechBubble {
   }
 
   private refresh() {
-    const on = this.saying && !this.covered;
+    const on = this.saying && !this.covered && !this.hidden;
     this.root.setVisible(on);
     this.tail.setVisible(on);
   }
@@ -249,6 +258,8 @@ export class Emote {
   private size = 1;
   /** Hidden for now under someone's speech bubble (see systems/bubbleLayout.ts). */
   private covered = false;
+  /** Out of Dalton's sight in the fog of war. */
+  private hidden = false;
 
   constructor(scene: Phaser.Scene) {
     this.g = scene.add.graphics().setDepth(DEPTH.marks).setVisible(false);
@@ -260,7 +271,7 @@ export class Emote {
 
   /** Where it is (world px), or null when there's none. */
   get bounds(): Box | null {
-    if (!this.kind) return null;
+    if (!this.kind || this.hidden) return null;
     const glyph = GLYPHS[this.kind];
     const w = (glyph[0].length + 4) * PX * this.size;
     const h = (glyph.length + 4 + TAIL.length - 1) * PX * this.size;
@@ -270,7 +281,13 @@ export class Emote {
   /** Hides it while a speech bubble covers it. */
   cover(on: boolean): void {
     this.covered = on;
-    this.g.setVisible(this.kind !== null && !on);
+    this.g.setVisible(this.kind !== null && !on && !this.hidden);
+  }
+
+  /** Hides it while its owner is out of Dalton's sight. */
+  setHidden(on: boolean): void {
+    this.hidden = on;
+    this.g.setVisible(this.kind !== null && !this.covered && !on);
   }
 
   /** Shows an emote (null hides it). `color` overrides the glyph colour (Mr. Gravy's orange '!'). */
@@ -280,7 +297,7 @@ export class Emote {
     if (!this.kind && kind) this.shownAt = time;
     this.kind = kind;
     this.color = c;
-    this.g.setVisible(kind !== null && !this.covered);
+    this.g.setVisible(kind !== null && !this.covered && !this.hidden);
     if (!kind) return;
     const glyph = GLYPHS[kind];
     const w = (glyph[0].length + 4) * PX;

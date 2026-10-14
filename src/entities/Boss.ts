@@ -34,8 +34,8 @@ export class Boss {
   readonly emote: Emote;
   readonly bubble: SpeechBubble;
   private readonly cone: Phaser.GameObjects.Graphics;
-  /** His vision cone's outline as last drawn: his flashlight in the dark (see src/world/Lighting.ts). */
-  conePoints: Point[] | null = null;
+  /** Whether Dalton can see him: out of his sight (the fog of war) he's hidden, with what he says. */
+  seen = true;
   /** Seconds left of shouting (pose 'yell') with his speech bubble up. */
   private shoutLeft = 0;
 
@@ -263,9 +263,21 @@ export class Boss {
 
     const look = chasing ? CONE_LOOKS.bossChase : this.suspicion > 0 || curious || responding || this.enraged ? CONE_LOOKS.bossSuspicious : CONE_LOOKS.boss;
     this.cone.clear();
-    this.conePoints = conePolygon(this.world.sight, this.visionCone);
     // Just handed out a warning: he isn't looking for Dalton for a moment.
-    drawCone(this.cone, this.conePoints, this.grace > 0 ? fadedCone(look, 0.35) : look);
+    drawCone(this.cone, conePolygon(this.world.sight, this.visionCone), this.grace > 0 ? fadedCone(look, 0.35) : look);
+  }
+
+  /**
+   * Shows or hides him (and his mark and speech bubble) as Dalton sees him or loses sight of him.
+   * His vision cone shows with `cone` (it lies under the fog, so only where Dalton sees the floor).
+   */
+  setSeen(seen: boolean, cone = seen): void {
+    this.cone.setVisible(cone);
+    if (seen === this.seen) return;
+    this.seen = seen;
+    this.view.setVisible(seen);
+    this.emote.setHidden(!seen);
+    this.bubble.setHidden(!seen);
   }
 
   private setState(state: BossState) {
