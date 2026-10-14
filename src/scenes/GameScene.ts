@@ -698,6 +698,10 @@ export class GameScene extends Phaser.Scene {
         const left = amount - added > 0.001 ? ` (bag full, left ${(amount - added).toFixed(2)})` : '';
         this.floatText(f.x, f.y - 30, `+${added.toFixed(2)} ${f.materialName.toLowerCase()}${left}`, color);
         this.maybeWakeCoworker(f);
+        if (f.def.gravyTruck) {
+          f.hideRecharge();
+          this.enrageGravy(f);
+        }
       },
     });
   }
@@ -775,6 +779,20 @@ export class GameScene extends Phaser.Scene {
     g.fillStyle(0x485060, 1).fillRect(x + 2 * P, y + 2 * P, inner, 2 * P);
     const fill = Math.round((inner * Math.min(1, ch.elapsed / ch.duration)) / P) * P;
     g.fillStyle(ch.kind === 'scrap' ? 0xf0903a : 0x58c858, 1).fillRect(x + 2 * P, y + 2 * P, fill, 2 * P);
+  }
+
+  /** Dalton stripped Mr. Gravy's truck: he's furious for the rest of the shift and storms over to it. */
+  private enrageGravy(truck: Fixture) {
+    const boss = this.boss;
+    if (boss.enraged) return;
+    boss.enrage();
+    sfx.warning();
+    this.cameras.main.shake(450, 0.012);
+    this.cameras.main.flash(250, 255, 50, 40);
+    const lines = GRAVY_LINES.truck;
+    boss.say(lines[Math.floor(Math.random() * lines.length)], 3);
+    boss.stormTo({ x: truck.x, y: truck.y });
+    this.toast(`You scrapped ${NPCS.mr_gravy.name}'s truck! He's FURIOUS for the rest of the shift.`, '#ff5a4f', 4500);
   }
 
   toast(text: string, color = '#f6f1e5', duration = 2600): void {

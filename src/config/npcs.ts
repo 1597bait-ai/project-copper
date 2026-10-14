@@ -48,6 +48,8 @@ export const GRAVY_LINES = {
   caught: ["HEY! That's school property!", 'What do you think you\'re doing?!', 'My office. NOW. ...Actually, get back to work.'],
   /** Hearing a student yell (only shown when he wasn't already on his way). */
   heard: ['Hm?! On my way!', 'WHAT?!', 'Who said copper?!'],
+  /** Finding his truck scrapped. */
+  truck: ['MY TRUCK!!!'],
 };
 
 /** `{money}` is replaced by the amount he pays. */

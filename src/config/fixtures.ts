@@ -27,6 +27,11 @@ export interface FixtureDef {
   solid: boolean;
   /** Mounted on a wall: drawn from the front on a top wall, or from the side (mirrored as needed) on a side wall. */
   wallMounted: boolean;
+  /**
+   * Mr. Gravy's truck: stripped once a shift (it never comes back, so it has no recharge to tune),
+   * and stripping it makes him furious (BALANCE.boss.enraged). On the map it's a 2x2 block of 'Y'.
+   */
+  gravyTruck?: boolean;
 }
 
 export const FIXTURES: Record<string, FixtureDef> = {
@@ -131,6 +136,20 @@ export const FIXTURES: Record<string, FixtureDef> = {
     workSeconds: 2.5,
     solid: true,
     wallMounted: false,
+  },
+  gravy_truck: {
+    id: 'gravy_truck',
+    name: "Mr. Gravy's Truck",
+    tier: 'very high',
+    type: 'general',
+    material: 'bare_bright',
+    scrap: 1.85,
+    range: [1.7, 2],
+    recharge: [1e6, 1e6],
+    workSeconds: 6,
+    solid: true,
+    wallMounted: false,
+    gravyTruck: true,
   },
 };
 

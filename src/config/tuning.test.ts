@@ -31,7 +31,10 @@ const NOT_TUNABLE = [
   /\.sprite$/,
   /\.variants$/,
   /\.color$/,
-  /^fixtures\.[^.]+\.(solid|wallMounted)$/,
+  /^fixtures\.[^.]+\.(solid|wallMounted|gravyTruck)$/,
+  ...Object.values(FIXTURES)
+    .filter((f) => f.gravyTruck)
+    .map((f) => new RegExp(`^fixtures\\.${f.id}\\.recharge$`)), // Mr. Gravy's truck never comes back in a shift
   /^npcs\.student\.(awareness|name)$/, // students use their own vision settings and are never named
   /^npcs\.sleepy_coworker\.(speed|awareness)$/, // he shuffles at balance.sleepyCoworker.shuffleTilesPerSecond
   /^abilities\.[^.]+\.description$/, // nothing in the game shows it (yet), so tuning it would change nothing

@@ -1,5 +1,5 @@
 // End-to-end check in a real (headless) browser. Plays through the core rules, the students, the
-// sleepy coworker, the lighting and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
+// sleepy coworker, Mr. Gravy's truck, the lighting and the map editor (Copper Studio's Map tab) on a desktop screen; then Copper
 // Studio: its settings, play tests and Map tab, a save round trip through the game page as
 // claude.ai publishes it (two owners saving at once and two tabs of one browser too), and the
 // Studio on a phone; then the touch controls on phones held sideways and upright. Saves
@@ -7,7 +7,7 @@
 //
 //   npm run build && npm run build:single && npm run e2e
 //   E2E_URL=http://localhost:5173 npm run e2e     (against a running dev server instead)
-//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, lighting, editor, studio, phone, portrait)
+//   E2E_ONLY=students,studio npm run e2e          (just some parts: desktop, students, coworker, truck, lighting, editor, studio, phone, portrait)
 //
 // Uses debug access via window.__COPPER__ to teleport people around. Every position comes from the
 // map and the world at runtime (fixtures by type, open hallway stretches, reachable tiles), and the
@@ -515,9 +515,10 @@ if (runs('desktop')) {
   await wait(0.5);
   await shot('start');
   check(
-    'the shift starts with Dalton on the built-in map (every student and fixture in it)',
-    await G(`return g.player.character.id === 'dalton' && g.students.length > 0 && g.students.length === g.world.map.students.length
-             && g.world.fixtures.length === g.world.map.fixtures.length && g.world.decor.length === g.world.map.decor.length;`),
+    'the shift starts with Dalton on the built-in map (every student and fixture in it, Mr. Gravy\'s truck one of them)',
+    await G(`const trucks = Math.min(1, g.world.map.decor.filter((d) => d.id === 'gravy_truck').length);
+             return g.player.character.id === 'dalton' && g.students.length > 0 && g.students.length === g.world.map.students.length
+             && g.world.fixtures.length === g.world.map.fixtures.length + trucks && g.world.decor.length === g.world.map.decor.length - trucks;`),
   );
   const art = await G(`const objs = sceneObjects(g);
     return {
@@ -845,6 +846,43 @@ if (runs('coworker')) {
     await page.evaluate(() => window.__COPPER__.game.scene.getScene('ShiftEnd').children.list.some((o) => o.text?.startsWith('Hush money'))),
   );
   check('no console errors (coworker)', errors.length === 0, errors);
+  await context.close();
+}
+
+// ---- desktop: Mr. Gravy's truck: strip it and he's furious for the rest of the shift -------------
+if (runs('truck')) {
+  const { context, page, errors, G, waitFor, wait, tap, shot, sceneActive, watchToasts } = await open('truck', { viewport: { width: 1600, height: 900 } });
+  await page.keyboard.press('Enter');
+  await sceneActive('Game');
+  await wait(0.3);
+  await watchToasts();
+  const truck = await G(`calm();
+    const trucks = g.world.fixtures.filter((f) => f.def.gravyTruck);
+    return { count: trucks.length, mapped: g.world.map.decor.filter((d) => d.id === 'gravy_truck').length };`);
+  check("Mr. Gravy's truck is on the map, as one fixture you can strip", truck.count === 1 && truck.mapped === 1, truck);
+  // Stripping it in the parking lot, out of his sight; he's listening again (no grace), so he storms over.
+  const before = await G(`const at = standBy('gravy_truck'); g.boss.grace = 0;
+    return { at, range: g.boss.range, half: g.boss.halfAngle, speed: g.boss.chaseSpeed };`);
+  await wait(0.2);
+  check('the prompt offers the truck', (await G('return g.hud.prompt;'))?.includes("Truck"), await G('return g.hud.prompt;'));
+  await tap('e');
+  check('stripping it fills the bag with bare bright copper', await waitFor("g.player.bag.total > 0 && !g.player.channel", 20), await G('return g.player.bag.peek();'));
+  const after = await G(`const f = g.world.fixtures.find((f) => f.def.gravyTruck); const e = B.boss.enraged;
+    return {
+      enraged: g.boss.enraged, state: g.boss.state, said: g.boss.bubble.visible ? g.boss.bubble.text.text : '',
+      range: g.boss.range / ${before.range}, half: g.boss.halfAngle, wantHalf: Math.min(${before.half} * e.halfAngleFactor, 1.2), speed: g.boss.chaseSpeed / ${before.speed},
+      e, ready: f.ready, ring: f.ring.visible, toasts: window.__toasts };`);
+  await wait(0.4);
+  await shot('furious');
+  check(
+    "...and Mr. Gravy is furious: he shouts, sees further and wider and chases faster (Studio's multipliers)",
+    after.enraged && after.said.length > 0 &&
+      Math.abs(after.range - after.e.rangeFactor) < 1e-6 && Math.abs(after.half - after.wantHalf) < 1e-6 && Math.abs(after.speed - after.e.speedFactor) < 1e-6,
+    after,
+  );
+  check('...storming over to his truck', after.state === 'respond', after.state);
+  check("...a toast says so, and the truck doesn't come back (no recharge clock)", after.toasts.some((t) => t.includes('truck')) && !after.ready && !after.ring, after);
+  check('no console errors (truck)', errors.length === 0, errors);
   await context.close();
 }
 

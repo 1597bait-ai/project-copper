@@ -74,6 +74,7 @@ export const DECOR_CHARS: Record<string, string> = {
   u: 'trash_can',
   T: 'tree',
   C: 'car',
+  Y: 'gravy_truck',
   O: 'boiler',
   Z: 'generator',
   Q: 'pressure_gauges',

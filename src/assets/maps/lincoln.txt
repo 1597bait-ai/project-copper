@@ -40,6 +40,7 @@
 //   u  Trash can
 //   T  Tree
 //   C  Parked car (fill a 2x2 block)
+//   Y  Mr. Gravy's truck (fill a 2x2 block)
 //   O  Boiler (fill a 2x2 block)
 //   Z  Generator (fill a 2x1 block)
 //   Q  Pressure gauges
@@ -105,8 +106,8 @@ FggggggggggggggggggB*==*BgggggggggggggggggggggggggF
 FgggggTgggggTggggTuBB==BBuTggggTgggggTgggggTggggggF
 F_________________________________________________F
 FpppppppppppppppppppppppppppppppppppppppppppppppppF
-Fp|CC|pp|CC|CC|pp|ppppppPVVVVppp|CC|CC|pp|CC|pp|ppF
-Fp|CC|pp|CC|CC|pp|pppppppVVVVppp|CC|CC|pp|CC|pp|ppF
+Fp|CC|pp|CC|CC|YY|ppppppPVVVVppp|CC|CC|pp|CC|pp|ppF
+Fp|CC|pp|CC|CC|YY|pppppppVVVVppp|CC|CC|pp|CC|pp|ppF
 FpppppppppppppppppppppppppppppppppppppppppppppppppF
 Fp|CC|CC|Tg|pp|CC|CC|TgpTg|CC|pp|Tg|CC|Tg|pp|CC|ppF
 Fp|CC|CC|gg|pp|CC|CC|ggpgg|CC|pp|gg|CC|gg|pp|CC|ppF

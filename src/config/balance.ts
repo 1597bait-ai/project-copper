@@ -124,6 +124,22 @@ export const BALANCE = {
     sprintFactor: 1.35,
     /** Seconds he looks around the spot a student reported. */
     respondSearchSeconds: 3,
+    /**
+     * Strip his truck and he's furious for the rest of the shift. Each of these multiplies one of
+     * his usual numbers: how far and how wide he sees (his cone at most 137° wide), how fast he
+     * chases (and so sprints), how fast he walks his route on top of that, how long he takes to
+     * catch you and from how close, how fast he forgets you, and how long he searches.
+     */
+    enraged: {
+      rangeFactor: 1.4,
+      halfAngleFactor: 1.35,
+      speedFactor: 1.2,
+      patrolFactor: 1.5,
+      noticeFactor: 0.6,
+      catchFactor: 1.3,
+      decayFactor: 0.5,
+      searchFactor: 2,
+    },
   },
 
   /**

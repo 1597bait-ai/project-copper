@@ -43,9 +43,10 @@ describe('content', () => {
   });
 
   it('every fixture and decoration has a map character', () => {
-    const mapped = new Set(Object.values(FIXTURE_CHARS));
-    for (const id of Object.keys(FIXTURES)) expect(mapped.has(id), `map character for ${id}`).toBe(true);
     const decor = new Set(Object.values(DECOR_CHARS));
+    // Mr. Gravy's truck is written as a block of its decoration character.
+    const mapped = new Set([...Object.values(FIXTURE_CHARS), ...Object.values(FIXTURES).filter((f) => f.gravyTruck && decor.has(f.id)).map((f) => f.id)]);
+    for (const id of Object.keys(FIXTURES)) expect(mapped.has(id), `map character for ${id}`).toBe(true);
     for (const id of Object.keys(DECOR)) expect(decor.has(id), `map character for ${id}`).toBe(true);
   });
 

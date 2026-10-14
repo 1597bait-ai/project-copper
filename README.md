@@ -54,9 +54,14 @@ from the van (out front in the parking lot):
   through the narrow corridor along the right wall, with the **locked electric panel room** inside
   it. The copper piles and panels back here are **bare bright copper**, worth twice normal copper,
   so a trip to the back pays the most.
+- *Parking lot*: **Mr. Gravy's truck** (the blue one) can be stripped once a shift for almost two
+  units of bare bright copper, right by the van. But he finds out at once: "MY TRUCK!!!" He storms
+  over and stays furious for the rest of the shift (sees further and wider, chases and patrols
+  faster, catches you sooner, forgets slower; tunable in Copper Studio).
 
-**Crew:** Dalton (fast, *Act Like a Student*: hides carried scrap for 5s), Tomothy (slow,
-best at repair, *Act Like You're Working*: scrapping looks legit for 6s), Dunkin (carries the most).
+**Crew:** Dalton (fast, *Act Like a Student*: hides carried scrap for 5s; navy polo, shades up on
+his head), Tomothy (slow, best at repair, *Act Like You're Working*: scrapping looks legit for 6s;
+long grey hair, beard, glasses), Dunkin (carries the most; bald, beard, glasses).
 
 ## Run it locally
 
@@ -206,8 +211,9 @@ Maps are plain text: **one character = one tile** (64 px). The file
 `,` classroom carpet, `W` whiteboard wall, `~`/`^` blue/pink restroom tile, `f` drinking
 fountain, `c` abandoned copper pile, `e` electric panel, `*` plant, `u` trash can, `T` tree,
 `s` sink, `Q` pressure gauges, `P` player start, `G` Mr. Gravy, `S` student, `L` a locked door,
-`1`–`9` Mr. Gravy's route in order, and blocks for big things: `C` a parked car (2x2), `O` the
-boiler (2x2), `Z` a generator (2x1) and `V` the van (4x2 or 2x4, e.g. two rows of `VVVV`).
+`1`–`9` Mr. Gravy's route in order, and blocks for big things: `C` a parked car (2x2), `Y` Mr.
+Gravy's truck (2x2, one per map, and it can be stripped), `O` the boiler (2x2), `Z` a generator
+(2x1) and `V` the van (4x2 or 2x4, e.g. two rows of `VVVV`).
 Things stand on the floor next to them, so you never pick a floor for them; put them on a floor
 tile beside a wall, not in the wall. Decorations (plants, trash cans, trees, cars, the boiler
 room's machines, sinks) block walking but not sight, so one typed into a wall line would be a

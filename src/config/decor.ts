@@ -19,6 +19,8 @@ export const DECOR: Record<string, DecorDef> = {
   trash_can: { id: 'trash_can', name: 'Trash can', mapName: 'Trash can', w: 1, h: 1 },
   tree: { id: 'tree', name: 'Tree', mapName: 'Tree', w: 1, h: 1 },
   car: { id: 'car', name: 'Parked car', mapName: 'Parked car (fill a 2x2 block)', w: 2, h: 2 },
+  // Scrappable, unlike the rest: the world builds it as the gravy_truck fixture (src/config/fixtures.ts).
+  gravy_truck: { id: 'gravy_truck', name: "Mr. Gravy's truck", mapName: "Mr. Gravy's truck (fill a 2x2 block)", w: 2, h: 2 },
   boiler: { id: 'boiler', name: 'Boiler', mapName: 'Boiler (fill a 2x2 block)', w: 2, h: 2 },
   generator: { id: 'generator', name: 'Generator', mapName: 'Generator (fill a 2x1 block)', w: 2, h: 1 },
   pressure_gauges: { id: 'pressure_gauges', name: 'Pressure gauges', mapName: 'Pressure gauges', w: 1, h: 1 },

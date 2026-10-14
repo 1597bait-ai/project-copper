@@ -20,8 +20,8 @@ import { Pix, addSheet, addTexture, alpha, fromRows, mix, shade, type Color } fr
 
 // ---------------------------------------------------------------- looks (edit these)
 
-export type HairStyle = 'short' | 'cap' | 'horseshoe' | 'beanie' | 'hood' | 'ponytail' | 'combover' | 'messy';
-export type TopStyle = 'tee' | 'hoodie' | 'suit' | 'cardigan';
+export type HairStyle = 'short' | 'cap' | 'horseshoe' | 'beanie' | 'hood' | 'ponytail' | 'combover' | 'messy' | 'long' | 'bald';
+export type TopStyle = 'tee' | 'hoodie' | 'suit' | 'cardigan' | 'polo';
 /** kid: shorter body (bigger head for their size); big: wider and taller (Mr. Gravy). */
 export type Build = 'kid' | 'adult' | 'big';
 export type EyeStyle = 'normal' | 'stern' | 'droopy';
@@ -43,6 +43,14 @@ export interface Look {
   pack?: number;
   eyes?: EyeStyle;
   mustache?: boolean;
+  /** A full beard, in `beardColor` (the hair colour without it). */
+  beard?: boolean;
+  beardColor?: number;
+  glasses?: boolean;
+  /** Sunglasses pushed up on the head. */
+  shades?: boolean;
+  /** A colourful print on the shirt. */
+  print?: boolean;
   /** Holds a coffee mug. */
   mug?: boolean;
   /** Gets sleep-0 / sleep-1 frames (slumped, dozing). */
@@ -55,8 +63,8 @@ const JEANS = 0x3f5f8f;
 /** Texture key -> look. Player looks use CHARACTERS[id].sprite; '<sprite>_disguise' is Dalton's ability. */
 export const LOOKS: Record<string, Look> = {
   dalton: {
-    skin: SKIN.light, hair: 'cap', hairColor: 0x6b4a2e, hat: 0x2f3b46, accent: 0xe8914a,
-    top: 'tee', shirt: 0x4caf50, pants: JEANS, shoes: 0x7a5230,
+    skin: SKIN.light, hair: 'short', hairColor: 0x6b4226, shades: true,
+    top: 'polo', shirt: 0x1f2d5c, pants: JEANS, shoes: 0x5c3a22,
   },
   // Act Like a Student: hood up, backpack on.
   dalton_disguise: {
@@ -64,12 +72,12 @@ export const LOOKS: Record<string, Look> = {
     top: 'hoodie', shirt: 0x7e57c2, pants: JEANS, shoes: 0xe8e4dc, pack: 0xf9a825,
   },
   tomothy: {
-    skin: SKIN.peach, hair: 'horseshoe', hairColor: 0xc9cdd2,
-    top: 'tee', shirt: 0x42a5f5, pants: 0x6b6150, shoes: 0x5a4030,
+    skin: SKIN.peach, hair: 'long', hairColor: 0xb4b7bc, beard: true, beardColor: 0x878b93, glasses: true,
+    top: 'tee', print: true, shirt: 0x34373f, pants: JEANS, shoes: 0x4a4e58,
   },
   dunkin: {
-    skin: SKIN.tan, hair: 'beanie', hairColor: 0x3a2a20, hat: 0x37474f,
-    top: 'tee', shirt: 0xef5350, pants: 0x2f4a6b, shoes: 0x3a3a40,
+    skin: 0xe9b48c, hair: 'bald', hairColor: 0x5a3a24, beard: true, glasses: true,
+    top: 'tee', shirt: 0x3e9a3e, pants: JEANS, shoes: 0x5c3a22,
   },
   mr_gravy: {
     build: 'big', skin: 0xf0b98a, hair: 'combover', hairColor: 0x4a3426, eyes: 'stern', mustache: true,
@@ -135,6 +143,12 @@ function paletteFor(look: Look): Record<string, Color> {
     g: 0x6f7a85,
     O: 0x5a3a22, // coffee
     x: alpha(0xffffff, 0.45), // steam
+    r: 0xe0524a, // shirt print
+    y: 0xf2c744,
+    v: 0x5bc25b,
+    j: 0x4c9be8,
+    Z: look.beardColor ?? look.hairColor, // beard
+    z: shade(look.beardColor ?? look.hairColor, 0.3),
   };
 }
 
@@ -321,9 +335,86 @@ const MUSTACHE: Record<'down' | 'right', Tpl> = {
   right: tpl(9, '..........HHHh..'),
 };
 
+const BEARD: Record<'down' | 'right', Tpl> = {
+  down: tpl(8,
+    '.Zz..........zZ.',
+    '.ZZZ.ZZZZZ.ZZz..',
+    '..ZZZZmmZZZZz...',
+    '...ZZZZZZZZz....',
+    '.....zzzz.......',
+  ),
+  right: tpl(8,
+    '.......z......Z.',
+    '.......ZZ...ZZZ.',
+    '........ZZZZZZz.',
+    '.........ZZZzz..',
+    '..........zz....',
+  ),
+};
+
+const GLASSES: Record<'down' | 'right', Tpl> = {
+  down: tpl(7, '...KKWKKKKWKK...', '....KEK..KEK....'),
+  right: tpl(7, '.......KKKKWK...', '..........KEK...'),
+};
+
+/** Sunglasses pushed up on the head (over the hair). */
+const SHADES: Partial<Record<View, Tpl>> = {
+  down: tpl(3, '...KKKKKKKKKK...', '...KggKKKKggK...'),
+  right: tpl(3, '........KKKKK...', '.........KggK...'),
+};
+
 // ---------------------------------------------------------------- hair and hats
 
-const HAIR: Record<HairStyle, Record<View, Tpl>> = {
+// Bald has nothing to draw from behind.
+const HAIR: Record<HairStyle, Partial<Record<View, Tpl>>> = {
+  long: {
+    down: tpl(1,
+      '.....HHHHHH.....',
+      '...HHIIHHHHHH...',
+      '..HHIHHHHHHHHh..',
+      '..HHHHH..HHHHh..',
+      '..HHh......hHh..',
+      '..HH........Hh..',
+      '..HH........hh..',
+      '..HH........hh..',
+      '..Hh........hh..',
+      '..hh........hh..',
+      '..h..........h..',
+    ),
+    up: tpl(1,
+      '.....HHHHHH.....',
+      '...HHIIHHHHHH...',
+      '..HHIHHHHHHHHh..',
+      '..HHHHHHHHHHhh..',
+      '..HHHHHHHHHHhh..',
+      '..HHHHHHHHHHhh..',
+      '..HHHHHHHHHHhh..',
+      '..HHHHHHHHHHhh..',
+      '..HHHHHHHHHHhh..',
+      '..hHHHHHHHHHhh..',
+      '..hhHHHHHHHhhh..',
+      '...hhHHHHHHhh...',
+      '....hhhhhhhh....',
+    ),
+    right: tpl(1,
+      '....HHHHHH......',
+      '...HHIIHHHHH....',
+      '..HHIHHHHHHHH...',
+      '..HHHHHHHHHHHH..',
+      '..HHHHHHh..h....',
+      '..HHHHHh........',
+      '..HHHHH.........',
+      '..HHHHH.........',
+      '..HHHHh.........',
+      '..hHHHh.........',
+      '..hhHh..........',
+      '...hh...........',
+    ),
+  },
+  bald: {
+    down: tpl(1, '................', '....LL..........', '...LL...........'),
+    right: tpl(1, '................', '....LL..........', '...LL...........'),
+  },
   short: {
     down: tpl(1,
       '.....HHHHHH.....',
@@ -841,6 +932,11 @@ const MUG = ['WWw.', 'WWwK', 'wwK.'];
 
 // Clothes details, at the stand-frame rows (step frames bob them down a row).
 const TOP_DETAILS: Record<TopStyle, Partial<Record<View, Tpl>>> = {
+  polo: {
+    down: tpl(12, '.....UUssUU.....', '.......t........', '.........W......'),
+    up: tpl(12, '....UUUUUUUU....'),
+    right: tpl(12, '.........UU.....', '..........t.....'),
+  },
   tee: {
     down: tpl(12, '......ssss......'),
   },
@@ -857,6 +953,12 @@ const TOP_DETAILS: Record<TopStyle, Partial<Record<View, Tpl>>> = {
     down: tpl(12, '.....UAAAAU.....', '.....WAAAAU.....', '.....UAAAAU.....', '.....WAAAAU.....', '.....UAAAAU.....'),
     right: tpl(12, '...........A....', '...........A....', '...........A....', '...........A....'),
   },
+};
+
+/** A print on the shirt front (with the clothes details' bob). */
+const SHIRT_PRINT: Record<'down' | 'right', Tpl> = {
+  down: tpl(13, '.......y.j......', '......ryvj......'),
+  right: tpl(13, '..........y.....', '.........rv.....'),
 };
 
 /** A hood worn down lies on the back. */
@@ -879,12 +981,16 @@ export function templateProblems(): string[] {
   const check = (name: string, t: Tpl) =>
     t.rows.forEach((r, i) => r.length !== W && problems.push(`${name} row ${i}: ${r.length} wide`));
   for (const [v, t] of Object.entries(HEAD)) check(`HEAD.${v}`, t);
-  for (const [style, views] of Object.entries(HAIR)) for (const [v, t] of Object.entries(views)) check(`HAIR.${style}.${v}`, t);
+  for (const [style, views] of Object.entries(HAIR)) for (const [v, t] of Object.entries(views)) check(`HAIR.${style}.${v}`, t!);
   for (const [name, t] of Object.entries(BODY)) check(`BODY.${name}`, t);
   for (const [style, views] of Object.entries(TOP_DETAILS)) for (const [v, t] of Object.entries(views)) check(`TOP_DETAILS.${style}.${v}`, t!);
   for (const [v, t] of Object.entries({ ...HOOD_DOWN })) check(`HOOD_DOWN.${v}`, t!);
   for (const [v, t] of Object.entries(PACK)) check(`PACK.${v}`, t);
   for (const [v, t] of Object.entries(MUSTACHE)) check(`MUSTACHE.${v}`, t);
+  for (const [v, t] of Object.entries(BEARD)) check(`BEARD.${v}`, t);
+  for (const [v, t] of Object.entries(GLASSES)) check(`GLASSES.${v}`, t);
+  for (const [v, t] of Object.entries(SHADES)) check(`SHADES.${v}`, t!);
+  for (const [v, t] of Object.entries(SHIRT_PRINT)) check(`SHIRT_PRINT.${v}`, t);
   check('ARM_UP', ARM_UP);
   check('ARM_TOOL', ARM_TOOL);
   for (const [name, t] of Object.entries(BODY)) if (t.y + t.rows.length !== H - 1) problems.push(`BODY.${name} ends at row ${t.y + t.rows.length - 1}, not ${H - 2}`);
@@ -986,6 +1092,14 @@ export function composeFrame(look: Look, f: FrameSpec): Grid {
     if (f.yell) stampPixels(g, MOUTH_OPEN[faceView].filter(([, y]) => !look.mustache || y > 9), head);
   }
   stampTpl(g, HAIR[look.hair][view], head);
+  if (faceView) {
+    if (look.beard) stampTpl(g, BEARD[faceView], head);
+    // A yell opens the mouth through the beard.
+    if (look.beard && f.yell) stampPixels(g, MOUTH_OPEN[faceView], head);
+    if (look.glasses) stampTpl(g, GLASSES[faceView], head);
+  }
+  if (look.shades) stampTpl(g, SHADES[view], head);
+  if (faceView && look.print && !f.headDrop) stampTpl(g, SHIRT_PRINT[faceView], f.bob);
 
   // In front of everything.
   if (f.armUp) {
@@ -1054,6 +1168,10 @@ function headTopAt(x: number, lift = 0): number {
 }
 
 function portraitHairBack(g: Grid, look: Look) {
+  if (look.hair === 'long') {
+    g.ellipse(6, 3, 36, 34, 'H');
+    g.ellipse(25, 3, 17, 34, 'h', 'H');
+  }
   if (look.hair === 'hood') {
     g.ellipse(5, 2, 38, 42, 'T');
     g.ellipse(5, 2, 38, 42, 't').ellipse(4, 1, 36, 40, 'T', 't');
@@ -1117,6 +1235,17 @@ function portraitHairFront(g: Grid, look: Look) {
       g.rect(11, 20, 3, 5, 'H').rect(34, 20, 3, 5, 'h');
       break;
     }
+    case 'long': {
+      hairShape(g, 9, 38, (x) => headTopAt(x, 2), (x) => Math.round(12 + Math.abs(x - 23.5) / 4));
+      g.ellipse(6, 12, 10, 32, 'H').ellipse(32, 12, 10, 32, 'H').ellipse(36, 12, 6, 32, 'h', 'H');
+      g.rect(24, 5, 1, 5, 'h');
+      g.rect(14, 7, 1, 5, 'I').rect(17, 6, 1, 4, 'I').rect(8, 16, 1, 18, 'I').rect(11, 14, 1, 10, 'I');
+      break;
+    }
+    case 'bald': {
+      g.rect(16, 11, 3, 2, 'L').rect(15, 13, 2, 2, 'L');
+      break;
+    }
     case 'hood': {
       // The hood's rim over the forehead and the sides of the face, a bit of fringe under it.
       g.ellipse(8, 3, 32, 22, 'T', undefined, 13);
@@ -1130,6 +1259,11 @@ function portraitHairFront(g: Grid, look: Look) {
 
 function portraitTop(g: Grid, look: Look) {
   switch (look.top) {
+    case 'polo':
+      g.ellipse(18, 31, 12, 6, 's', 'tT');
+      g.rect(16, 33, 6, 3, 'U').rect(26, 33, 6, 3, 'U').rect(17, 36, 4, 1, 'U').rect(27, 36, 4, 1, 'U');
+      g.rect(23, 36, 2, 6, 't').rect(23, 37, 1, 1, 'W').rect(23, 40, 1, 1, 'W').rect(30, 39, 3, 3, 'W').set(31, 40, 'T');
+      break;
     case 'tee':
       g.ellipse(17, 32, 14, 7, 't', 'T').ellipse(18, 31, 12, 6, 's', 'tT');
       break;
@@ -1153,6 +1287,7 @@ function portraitTop(g: Grid, look: Look) {
       g.rect(16, 39, 1, 1, 'W').rect(16, 43, 1, 1, 'W');
       break;
   }
+  if (look.print) g.rect(19, 41, 2, 5, 'r').rect(22, 38, 2, 8, 'y').rect(25, 40, 2, 6, 'v').rect(28, 37, 2, 9, 'j');
   if (look.pack) g.rect(11, 36, 3, 12, 'B').rect(13, 36, 1, 12, 'b').rect(34, 36, 3, 12, 'b');
 }
 
@@ -1197,6 +1332,22 @@ export function characterPortrait(look: Look): Pix {
   g.ellipse(11 - wide, 8, 26 + wide * 2, 27 + wide, 's').ellipse(10 - wide, 7, 25 + wide * 2, 26 + wide, 'S', 's');
   portraitFace(g, look);
   portraitHairFront(g, look);
+  if (look.beard) {
+    g.ellipse(10, 8, 27, 27, 'Z', 'Ss', undefined, 26);
+    g.ellipse(15, 27, 18, 11, 'Z', 'tTUs');
+    g.ellipse(17, 30, 14, 8, 'z', 'Z', undefined, 35);
+    g.rect(19, 27, 10, 2, 'Z');
+    g.rect(21, 30, 6, 1, 'm');
+    g.set(24, 26, 's').set(23, 26, 's').set(25, 26, 's');
+  }
+  if (look.glasses) {
+    for (const x of [15, 26]) g.rect(x, 18, 7, 2, 'E').rect(x, 25, 7, 1, 'E').rect(x, 18, 1, 8, 'E').rect(x + 6, 18, 1, 8, 'E');
+    g.rect(22, 20, 4, 1, 'E').rect(11, 20, 4, 1, 'E').rect(33, 20, 3, 1, 'E');
+  }
+  if (look.shades) {
+    g.rect(13, 8, 9, 5, 'E').rect(26, 8, 9, 5, 'E').rect(21, 9, 6, 2, 'E');
+    g.rect(14, 9, 7, 3, 'g').rect(27, 9, 7, 3, 'g').rect(15, 9, 2, 1, 'G').rect(28, 9, 2, 1, 'G');
+  }
   if (look.mug) {
     g.rect(30, 37, 10, 10, 'W').rect(37, 37, 3, 10, 'w').rect(40, 39, 3, 1, 'w').rect(42, 39, 1, 5, 'w').rect(40, 43, 3, 1, 'w');
     g.rect(31, 37, 6, 2, 'O');

@@ -563,10 +563,12 @@ interface CarColor {
   body: number;
 }
 
-/** Parked car colours. Each comes facing you ('car_blue') and the other way ('car_blue_rear'). */
+/**
+ * Parked car colours. Each comes facing you ('car_white') and the other way ('car_white_rear').
+ * No blue: that's Mr. Gravy's truck.
+ */
 export const CAR_COLORS: readonly CarColor[] = [
   { key: 'car', body: 0xd9473b },
-  { key: 'car_blue', body: 0x3f6fd6 },
   { key: 'car_white', body: 0xe9edf1 },
   { key: 'car_brown', body: 0x8e5b3a },
   { key: 'car_green', body: 0x4a9a5c },
@@ -610,6 +612,16 @@ function car(body: number, rear = false): Pix {
   p.rect(2, 15, 2, 2, body).rect(28, 15, 2, 2, D);
   p.outline(OUT);
   under(p, 1, 27, 30, 5, alpha(SHADOW, 0.3));
+  return p;
+}
+
+/** Mr. Gravy's truck (a 2x2 tile block): a blue car with a rack on the roof and a gold number plate. */
+function gravyTruck(): Pix {
+  const p = new Pix(32, 36).draw(car(0x2f6fdb), 0, 4);
+  p.hline(6, 1, 20, OUT).hline(6, 2, 20, 0xc9d1da).hline(6, 3, 20, OUT);
+  for (const x of [8, 15, 23]) p.vline(x, 4, 3, OUT);
+  p.set(5, 1, OUT).set(5, 2, OUT).set(5, 3, OUT).set(26, 1, OUT).set(26, 2, OUT).set(26, 3, OUT);
+  p.rect(12, 29, 8, 2, 0xf2c744).hline(13, 29, 6, 0xffe38a);
   return p;
 }
 
@@ -854,6 +866,7 @@ export function objectPix(): Record<string, Pix> {
     door_open_v1: doorDown(1, false),
     select_corner: selectCorner(),
     fixture_glow: glow(),
+    gravy_truck: gravyTruck(),
   };
   for (const c of CAR_COLORS) {
     out[c.key] = car(c.body);

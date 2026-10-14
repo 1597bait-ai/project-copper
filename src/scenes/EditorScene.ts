@@ -105,6 +105,7 @@ const DECOR_LABELS: Record<string, string> = {
   trash_can: 'Trash can',
   tree: 'Tree',
   car: 'Car',
+  gravy_truck: 'Gravy truck',
   boiler: 'Boiler',
   generator: 'Generator',
   pressure_gauges: 'Gauges',

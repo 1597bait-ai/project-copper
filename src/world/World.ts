@@ -123,6 +123,13 @@ export class World {
     }
 
     for (const d of map.decor) {
+      if (d.id === 'gravy_truck') {
+        // Mr. Gravy's truck is scrap, not scenery: a fixture standing on the bottom of its block (one per map).
+        if (this.fixtures.some((f) => f.def.gravyTruck)) continue;
+        this.fixtures.push(new Fixture(scene, FIXTURES.gravy_truck, (d.x + d.w / 2) * TILE, (d.y + d.h) * TILE - TILE / 2));
+        block(d, 6);
+        continue;
+      }
       this.decor.push(standOnFloor(scene.add.image(0, 0, decorKey(d)), d));
       // Solid but see-through: blocks walking only.
       block(d, d.w > 1 || d.h > 1 ? 6 : TILE * 0.12);

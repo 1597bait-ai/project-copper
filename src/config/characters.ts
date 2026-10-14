@@ -61,7 +61,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     specialty: 'hvac', // guess — not on the board yet
     ability: 'student_disguise',
     sprite: 'dalton',
-    color: 0x4caf50,
+    color: 0x4a72c8,
   },
   tomothy: {
     id: 'tomothy',
@@ -71,7 +71,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     specialty: 'plumbing', // guess — not on the board yet
     ability: 'look_busy',
     sprite: 'tomothy',
-    color: 0x42a5f5,
+    color: 0x3ba7a0,
   },
   dunkin: {
     id: 'dunkin',
@@ -81,7 +81,7 @@ export const CHARACTERS: Record<string, CharacterDef> = {
     specialty: null,
     ability: null, // no special ability on the board yet
     sprite: 'dunkin',
-    color: 0xef5350,
+    color: 0x4caf50,
   },
 };
 

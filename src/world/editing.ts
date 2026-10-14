@@ -248,6 +248,12 @@ export function paint(rows: readonly string[], x: number, y: number, ch: string,
     for (let cy = r.y; cy < r.y + r.h; cy++) {
       for (let cx = r.x; cx < r.x + r.w; cx++) if (isWallChar(rows[cy][cx])) return { ...unchanged, message: 'That needs open ground, with no walls under it' };
     }
+    // Mr. Gravy has one truck: placing it moves it.
+    if (DECOR_CHARS[ch] === 'gravy_truck') {
+      rows.forEach((row, cy) => {
+        for (let cx = 0; cx < row.length; cx++) if (row[cx] === ch && grid[cy][cx] === ch) removeDecor(blockPiece(rows, cx, cy));
+      });
+    }
     for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) removeBig(cx, cy);
     for (let cy = r.y; cy < r.y + r.h; cy++) for (let cx = r.x; cx < r.x + r.w; cx++) grid[cy][cx] = ch;
     if (!isWholeBlock(grid.map((row) => row.join('')), r.x, r.y)) {

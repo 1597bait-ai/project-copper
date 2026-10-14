@@ -57,9 +57,11 @@ export class Boss {
   /** The waypoint being walked to and where that leg started, to notice overshooting it. */
   private legTo: Point | null = null;
   private legFrom: Point = { x: 0, y: 0 };
-  private readonly range: number;
-  private readonly halfAngle: number;
-  private readonly chaseSpeed: number;
+  private range: number;
+  private halfAngle: number;
+  private chaseSpeed: number;
+  /** Furious for the rest of the shift: someone stripped his truck (see enrage). */
+  enraged = false;
 
   constructor(
     scene: Phaser.Scene,
@@ -120,22 +122,22 @@ export class Boss {
     if (sees) {
       const near = BALANCE.boss.noticeSecondsNear;
       const far = BALANCE.boss.noticeSecondsFar;
-      const secondsToCatch = (near + (far - near) * Math.min(1, dist / this.range)) * (2 / this.def.awareness);
+      const secondsToCatch = (near + (far - near) * Math.min(1, dist / this.range)) * (2 / this.def.awareness) * this.rage('noticeFactor');
       this.suspicion = Math.min(1, this.suspicion + dt / secondsToCatch);
       this.lastSeen = target;
       this.newsAge = 0;
       if (this.suspicion >= 1) return true;
       if (this.state !== 'chase') this.setState(this.suspicion >= BALANCE.boss.chaseAt ? 'chase' : 'alert');
     } else {
-      this.suspicion = Math.max(0, this.suspicion - BALANCE.boss.suspicionDecay * dt);
+      this.suspicion = Math.max(0, this.suspicion - BALANCE.boss.suspicionDecay * this.rage('decayFactor') * dt);
       if ((this.state === 'alert' || this.state === 'chase') && this.lastSeen) {
         this.setState('search');
         this.goTo(this.lastSeen);
-        this.timer = BALANCE.boss.searchSeconds;
+        this.timer = BALANCE.boss.searchSeconds * this.rage('searchFactor');
       }
     }
 
-    if (this.state === 'chase' && player.suspicious && this.grace <= 0 && dist < BALANCE.boss.catchRangeTiles * TILE + RADIUS) {
+    if (this.state === 'chase' && player.suspicious && this.grace <= 0 && dist < BALANCE.boss.catchRangeTiles * this.rage('catchFactor') * TILE + RADIUS) {
       return true;
     }
 
@@ -143,7 +145,7 @@ export class Boss {
     switch (this.state) {
       case 'patrol':
       case 'return':
-        if (this.follow(dt, speed * BALANCE.boss.patrolFactor)) {
+        if (this.follow(dt, speed * BALANCE.boss.patrolFactor * this.rage('patrolFactor'))) {
           this.setState('pause');
           this.timer = Phaser.Math.FloatBetween(...BALANCE.boss.waypointPause);
           this.lookBase = this.facing;
@@ -203,6 +205,31 @@ export class Boss {
     return true;
   }
 
+  /** One of BALANCE.boss.enraged's multipliers while he's furious, else 1. */
+  private rage(factor: keyof typeof BALANCE.boss.enraged): number {
+    return this.enraged ? BALANCE.boss.enraged[factor] : 1;
+  }
+
+  /**
+   * Someone stripped his truck: furious for the rest of the shift (BALANCE.boss.enraged), seeing
+   * further and wider (his cone at most 137° wide), chasing harder, and red in the face.
+   */
+  enrage(): void {
+    if (this.enraged) return;
+    const e = BALANCE.boss.enraged;
+    this.enraged = true;
+    this.range *= e.rangeFactor;
+    this.halfAngle = Math.min(this.halfAngle * e.halfAngleFactor, 1.2);
+    this.chaseSpeed *= e.speedFactor;
+    this.view.setTint(0xffb0a4);
+  }
+
+  /** Storms over to `point` (his stripped truck), whatever he knew before; not while chasing you or ignoring you after a warning. */
+  stormTo(point: Point): boolean {
+    this.newsAge = Infinity;
+    return this.respondTo(point);
+  }
+
   /** Says something in a speech bubble, shouting (pose 'yell') for `seconds`. */
   say(text: string, seconds: number, shout = true): void {
     this.bubble.say(text, seconds, shout ? 'shout' : 'talk');
@@ -234,7 +261,7 @@ export class Boss {
     this.emote.place(this.x, head, time, size);
     this.bubble.place(this.x, head, view, size);
 
-    const look = chasing ? CONE_LOOKS.bossChase : this.suspicion > 0 || curious || responding ? CONE_LOOKS.bossSuspicious : CONE_LOOKS.boss;
+    const look = chasing ? CONE_LOOKS.bossChase : this.suspicion > 0 || curious || responding || this.enraged ? CONE_LOOKS.bossSuspicious : CONE_LOOKS.boss;
     this.cone.clear();
     this.conePoints = conePolygon(this.world.sight, this.visionCone);
     // Just handed out a warning: he isn't looking for Dalton for a moment.

@@ -30,7 +30,8 @@ describe('object art', () => {
   it('fixtures are one tile wide and stand on their tile (taller ones reach up over the wall)', () => {
     for (const def of Object.values(FIXTURES)) {
       const p = all[def.id];
-      expect(p.w, def.id).toBe(16);
+      // Mr. Gravy's truck goes on the map as a block (src/config/decor.ts): as wide as that.
+      expect(p.w, def.id).toBe(16 * (def.gravyTruck ? DECOR[def.id].w : 1));
       expect(p.h, def.id).toBeGreaterThanOrEqual(16);
     }
   });

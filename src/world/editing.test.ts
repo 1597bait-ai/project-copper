@@ -218,6 +218,16 @@ describe('paint', () => {
     expect(paint(SMALL, 8, 8, 'C').message).toContain('open ground');
   });
 
+  it("keeps one Mr. Gravy's truck: placing it again moves it, leaving the cars be", () => {
+    const lot = ['pppppppp', 'pYYpCCpp', 'pYYpCCpp', 'pppppppp', 'pppppppp'];
+    const moved = paint(lot, 5, 3, 'Y');
+    expect(moved.rows).toEqual(['pppppppp', 'ppppCCpp', 'ppppCCpp', 'pppppYYp', 'pppppYYp']);
+    expect(parseMap(moved.rows.join('\n')).decor.filter((d) => d.id === 'gravy_truck')).toEqual([{ id: 'gravy_truck', x: 5, y: 3, w: 2, h: 2 }]);
+    // Over the car: the car goes, the old truck too.
+    expect(count(paint(lot, 4, 1, 'Y').rows, 'Y')).toBe(4);
+    expect(count(paint(lot, 4, 1, 'Y').rows, 'C')).toBe(0);
+  });
+
   it('cuts a block of cars into 2x2 cars and removes only the one touched', () => {
     const lot = ['pppppp', 'pCCCCp', 'pCCCCp', 'pppppp'];
     expect(parseMap(lot.join('\n')).decor.map((d) => d.x)).toEqual([1, 3]);

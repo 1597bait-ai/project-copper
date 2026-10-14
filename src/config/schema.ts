@@ -277,9 +277,32 @@ const gravy = section('gravy', 'Mr. Gravy', 'The boss: how fast he is, how far h
     ],
   },
   {
+    id: 'gravy.truck',
+    title: 'When you scrap his truck',
+    help: "His truck (Y on the map) can be stripped once a shift. Then he's furious for the rest of it: each of these multiplies his usual number.",
+    fields: [
+      num('balance.boss.enraged.rangeFactor', 'Vision reach', 0.5, 3, 0.05, { unit: '×', preview: (v) => `sees ${fmt(gravyRange(v) * v.balance.boss.enraged.rangeFactor)} tiles` }),
+      num('balance.boss.enraged.halfAngleFactor', 'Cone width', 0.5, 3, 0.05, {
+        unit: '×',
+        help: 'At most 137° wide.',
+        preview: (v) => `${fmt(Math.min(gravyAngle(v) * v.balance.boss.enraged.halfAngleFactor, 137.5), 0)}° cone`,
+      }),
+      num('balance.boss.enraged.speedFactor', 'Chase speed', 0.5, 3, 0.05, { unit: '×', help: 'His sprint to a yell too.' }),
+      num('balance.boss.enraged.patrolFactor', 'Patrol speed, on top of that', 0.5, 3, 0.05, { unit: '×' }),
+      num('balance.boss.enraged.noticeFactor', 'Time to catch you', 0.1, 3, 0.05, { unit: '×' }),
+      num('balance.boss.enraged.catchFactor', 'Catch distance', 0.5, 3, 0.05, { unit: '×' }),
+      num('balance.boss.enraged.decayFactor', 'Suspicion lost out of sight', 0, 3, 0.05, { unit: '×' }),
+      num('balance.boss.enraged.searchFactor', 'Searching where he lost you', 0.1, 5, 0.1, { unit: '×' }),
+    ],
+  },
+  {
     id: 'gravy.lines',
     title: 'What he says',
-    fields: [lines('lines.gravy.caught', 'Catching you (by warning number; the last repeats)'), lines('lines.gravy.heard', 'Hearing a student yell')],
+    fields: [
+      lines('lines.gravy.caught', 'Catching you (by warning number; the last repeats)'),
+      lines('lines.gravy.heard', 'Hearing a student yell'),
+      lines('lines.gravy.truck', 'Finding his truck stripped'),
+    ],
   },
 ]);
 
@@ -453,7 +476,8 @@ const loot = section('loot', 'Scrap & Loot', 'What scrap sells for, and what eac
           unit: 's',
           preview: (v) => crewLine(v, (id) => `${fmt(stripSeconds(v, id, f.id))} s`),
         }),
-        range(`fixtures.${f.id}.recharge`, 'Can be stripped again after', 0, 900, 1, 's'),
+        // Mr. Gravy's truck never comes back in a shift.
+        ...(f.gravyTruck ? [] : [range(`fixtures.${f.id}.recharge`, 'Can be stripped again after', 0, 900, 1, 's')]),
         { path: `fixtures.${f.id}.type`, label: 'Trade', kind: { type: 'choice', options: TRADE_OPTIONS } },
         { path: `fixtures.${f.id}.tier`, label: 'Value tier (glow colour)', kind: { type: 'choice', options: TIER_OPTIONS }, advanced: true },
       ],

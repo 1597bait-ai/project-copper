@@ -96,6 +96,11 @@ export class Fixture {
     this.ring.setFrame('recharge-0').setVisible(true);
   }
 
+  /** Stripped for good (Mr. Gravy's truck): no recharge clock over it. */
+  hideRecharge(): void {
+    this.ring.setVisible(false);
+  }
+
   update(dt: number): void {
     if (this.ready) return;
     this.rechargeLeft -= dt;
